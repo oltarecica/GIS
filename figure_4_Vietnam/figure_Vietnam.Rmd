@@ -1,0 +1,205 @@
+---
+title: "4. Balboni, C.A., 2021. In harm's way? infrastructure investments and the persistence of coastal cities. (fig. 3: Vietnam's road infrastructure by road type)"
+output: pdf_document
+---
+
+## Introduction
+This document replicates Figure 3 from Balboni (2021), *“In Harm’s Way? Infrastructure Investments and the Persistence of Coastal Cities”*.  
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+## Packages
+```{r}
+library(sf)
+library(dplyr)
+library(ggplot2)
+library(rnaturalearth)
+library(patchwork)
+```
+
+## Vietnam boundary
+```{r}
+vietnam <- ne_countries(
+  scale = "medium",
+  country = "Vietnam",
+  returnclass = "sf"
+)
+
+st_crs(vietnam)
+```
+
+## 2000 map
+
+### Road Data (Natural Earth)
+```{r}
+roads_ne <- ne_download(scale = "large",
+                        type = "roads",
+                        category = "cultural",
+                        returnclass = "sf")
+```
+
+### Clip to Vietnam
+```{r}
+roads_vn <- st_intersection(roads_ne, vietnam)
+```
+
+### Road Type Classification
+```{r}
+roads_vn <- roads_vn %>%
+  mutate(road_cat = case_when(
+    type == "Major Highway" ~ "Major roads",
+    type == "Road"         ~ "Minor roads",
+    TRUE                   ~ "Other roads"
+  ))
+```
+### Road layers 2000
+```{r}
+major_roads <- roads_vn %>% filter(road_cat == "Major roads")
+minor_roads <- roads_vn %>% filter(road_cat == "Minor roads")
+other_roads <- roads_vn %>% filter(road_cat == "Other roads")
+```
+
+### 2000 map approximation
+```{r}
+map_2000 <- ggplot() +
+  geom_sf(data = vietnam, fill = "white", color = "grey40") +
+  geom_sf(data = other_roads, color = "#f7d7a6", size = 0.15) +
+  geom_sf(data = minor_roads, color = "#f1a340", size = 0.25) +
+  geom_sf(data = major_roads, color = "red", size = 0.6) +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),
+    axis.title = element_blank(),
+    axis.text = element_blank(),
+    axis.ticks = element_blank()
+  ) +
+  ggtitle("Road map 2000")
+```
+
+## 2010 map
+### Load OSM roads
+```{r}
+roads_osm <- st_read("vietnam-260126-free.shp/gis_osm_roads_free_1.shp")
+
+### Check categories
+```{r}
+table(roads_osm$fclass)
+```
+
+### Clip to Vietnam
+```{r}
+roads_osm <- st_transform(roads_osm, st_crs(vietnam))
+roads_osm_vn <- st_intersection(roads_osm, vietnam)
+```
+
+### Road classification
+```{r}
+roads_osm_vn <- roads_osm_vn %>%
+  mutate(road_cat = case_when(
+    fclass == "motorway"                      ~ "Freeways",
+    fclass %in% c("trunk", "primary")         ~ "Dual carriageway",
+    fclass == "secondary"                    ~ "Major roads",
+    fclass == "tertiary"                     ~ "Minor roads",
+    TRUE                                      ~ "Other roads"
+  ))
+
+table(roads_osm_vn$road_cat)
+```
+
+### Select roads to display
+```{r}
+roads_2010 <- roads_osm_vn %>%
+  filter(road_cat %in% c(
+    "Freeways",
+    "Dual carriageway",
+    "Major roads",
+    "Minor roads"
+  ))
+
+roads_2010$road_cat <- factor(
+  roads_2010$road_cat,
+  levels = c("Freeways", "Dual carriageway", "Major roads", "Minor roads")
+)
+```
+
+### Road layers 2010
+```{r}
+freeways  <- roads_2010 %>% filter(road_cat == "Freeways")
+dual      <- roads_2010 %>% filter(road_cat == "Dual carriageway")
+major_new <- roads_2010 %>% filter(road_cat == "Major roads")
+
+# Thin minor roads: keep only 30%
+set.seed(123)
+minor_new <- roads_2010 %>% 
+  filter(road_cat == "Minor roads") %>%
+  slice_sample(prop = 0.30)
+
+nrow(freeways)
+nrow(dual)
+nrow(major_new)
+nrow(minor_new)
+```
+
+### simplify geometries
+```{r}
+freeways  <- st_simplify(freeways,  dTolerance = 0.001)
+dual      <- st_simplify(dual,      dTolerance = 0.001)
+major_new <- st_simplify(major_new, dTolerance = 0.001)
+minor_new <- st_simplify(minor_new, dTolerance = 0.001)
+```
+
+### 2010 map approximation
+```{r}
+road_cols <- c(
+  "Freeways"          = "#b30000",   # dark red (strong backbone)
+  "Dual carriageway" = "#1f4ea8",   # deep blue (very distinguishable)
+  "Major roads"      = "#f1a340",   # orange
+  "Minor roads"      = "#f2d6a2"    # pale sand (background texture)
+)
+
+map_2010 <- ggplot() +
+  geom_sf(data = vietnam, fill = "white", color = "grey40") +
+  
+  # lowest hierarchy first
+  geom_sf(data = minor_new,  aes(color = road_cat), size = 0.10) +
+  geom_sf(data = major_new,  aes(color = road_cat), size = 0.20) +
+  geom_sf(data = dual,       aes(color = road_cat), size = 0.35) +
+  geom_sf(data = freeways,   aes(color = road_cat), size = 0.70) +
+  
+  scale_color_manual(
+    name = "Road types",
+    values = road_cols,
+    breaks = c("Freeways", "Dual carriageway", "Major roads", "Minor roads")
+  ) +
+  
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),
+    axis.title = element_blank(),
+    axis.text  = element_blank(),
+    axis.ticks = element_blank(),
+    legend.position = "bottom",
+    legend.justification = "center",
+    legend.title = element_text(size = 11),
+    legend.text  = element_text(size = 10)
+  ) +
+  ggtitle("Road map 2010")
+```
+
+## Final figure 
+```{r}
+(map_2000 | map_2010) +
+  plot_layout(guides = "collect") & 
+  theme(
+    legend.position = "bottom",
+    legend.justification = "center",
+    legend.title = element_text(size = 11),
+    legend.text = element_text(size = 10)
+  )
+```

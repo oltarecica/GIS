@@ -1,0 +1,59 @@
+---
+title: "Figure 4: Districts and Electricity Grid in Ethiopia"
+author: "Olsa Berani"
+output: html_document
+---
+
+## Objective
+
+This notebook replicates **Figure 4: Districts and Electricity Grid in Ethiopia**
+from *Fried and Lagakos (2021)* as part of the take-home assignment on spatial
+data visualization using vector data in economics.
+
+---
+
+## Data
+
+- **District boundaries**: GADM (administrative level 2)
+- **Electricity grid**: OpenStreetMap, extracted using Overpass Turbo
+
+---
+
+## Replication
+
+```{r setup, message=FALSE, warning=FALSE}
+rm(list = ls())
+
+library(sf)
+library(ggplot2)
+library(dplyr)
+
+setwd("/Users/olsaberani/Desktop/Figure_2")
+
+# Load administrative districts
+districts <- st_read("gadm/gadm41_ETH_2.shp")
+
+# Load electricity transmission lines
+grid_raw <- st_read("grid/ethiopia_power_lines.geojson")
+```
+
+```{r map, fig.width=7, fig.height=8, echo=FALSE}
+ggplot() +
+  geom_sf(
+    data = districts,
+    fill = "grey85",
+    color = "white",
+    linewidth = 0.2
+  ) +
+  geom_sf(
+    data = grid_raw,
+    color = "red",
+    linewidth = 0.6
+  ) +
+  theme_void() +
+  labs(
+    title = "Figure 4: Districts and Electricity Grid in Ethiopia",
+    caption = "Districts: GADM (Level 2). Electricity grid: OpenStreetMap (Overpass Turbo). Replication of Fried and Lagakos (2021)."
+  )
+```
+

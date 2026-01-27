@@ -127,12 +127,12 @@ sa_districts$elev_class <- cut(
 ```
 
 ### Replication of Figure 2: Dam locations and average elevation by district
-```{r final_map}
+```{r final_map, eval=TRUE}
 # ------------------------------------------------------
 # Replication map
 # ------------------------------------------------------
 
-ggplot() +
+p <- ggplot() +
   geom_sf(data = sa_districts, aes(fill = elev_class),
           color = "white", linewidth = 0.15) +
   geom_sf(data = dams_sa, color = "black", size = 0.3, alpha = 0.6) +
@@ -147,6 +147,14 @@ ggplot() +
     axis.text = element_blank(),
     axis.title = element_blank()
   )
+
+ggsave(
+  "figure2_dams_elevation.png",
+  plot = p,
+  width = 14,
+  height = 8,
+  dpi = 300
+)
 ```
 
 ## Explanation section

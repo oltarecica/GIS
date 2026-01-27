@@ -1,0 +1,160 @@
+---
+title: "Hw1_geospatial"
+output: html_document
+date: "2026-01-26"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readr)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(sf)
+library(geobr)
+library(stringi)
+library(scales)
+library(rmapshaper)
+```
+
+n the original paper, the author works with mesoregions as the main spatial unit of analysis. However, this level of geographic aggregation is not consistently available in official digital sources for the full time span considered here. While the author digitized mesoregional information from historical census publications for earlier decades, publicly available mesoregion data from official sources only start in 1970.
+To ensure consistency across time and to rely exclusively on official, harmonized data sources, we conduct the analysis at the state (UF) level for all years. Using mesoregions only from 1970 onward would require combining spatial units of different granularity (states before 1970 and mesoregions after 1970), which would make the visualization of long-run spatial changes misleading and difficult to interpret.
+All population data used in this replication were collected from IBGE’s SIDRA system, accessed through the official IBGE API. In particular, we rely on SIDRA Table 4714 (https://sidra.ibge.gov.br/tabela/4714), which provides harmonized population totals by state from the Brazilian population censuses. This choice ensures transparency, reproducibility, and consistency of the data across years, while preserving comparability with the original analysis.
+
+```{r cars}
+raw <- read_lines("pop_data.csv")
+
+# keep:
+# - line 4 (header)
+# - lines 6 to 32 (data)
+clean_lines <- c(raw[4], raw[6:32])
+
+pop_wide <- read_csv2(
+  I(clean_lines),
+  show_col_types = FALSE
+)
+
+```
+Next, we merge Distrito Federal into Goiás by renaming both to "Goiás" and summing across years, leaving a single row for Goiás and removing DF from the dataset. We basically do it because Distrito Federal was formed after 1950 when Brazil "created" the city of Brasilia to be the capital.
+
+```{r pressure, echo=FALSE}
+years <- c("1950", "2000", "2010")
+
+pop_wide2 <- pop_wide %>%
+  mutate(across(all_of(years), as.numeric)) %>%
+  mutate(
+    uf_std = case_when(
+      `Unidade da Federação` %in% c("Goiás", "Goias", "Distrito Federal") ~ "Goiás",
+      TRUE ~ `Unidade da Federação`
+    )
+  ) %>%
+  group_by(uf_std) %>%
+  summarise(across(all_of(years), sum, na.rm = TRUE), .groups = "drop") %>%
+  rename(`Unidade da Federação` = uf_std)
+```
+We then reshape the data to long format and compute population shares within each year (i.e., the shares sum to 1 separately for 1950, 2000, and 2010).
+```{r}
+pop_long <- pop_wide2 %>%
+  pivot_longer(cols = all_of(years), names_to = "year", values_to = "pop") %>%
+  mutate(year = as.integer(year)) %>%
+  group_by(year) %>%
+  mutate(pop_share = pop / sum(pop, na.rm = TRUE)) %>%
+  ungroup()
+
+
+```
+
+Now we load the Brazilian state geometries, remove Distrito Federal from the map (since DF was merged into Goiás), standardize names to a comparable key, and join the map with the population shares.
+
+```{r}
+br_states <- geobr::read_state(year = 2010, showProgress = FALSE) %>%
+  st_transform(4674) %>%
+  mutate(name_key = stri_trans_general(name_state, "Latin-ASCII") |> tolower()) %>%
+  filter(name_state != "Distrito Federal")
+
+pop_long <- pop_long %>%
+  mutate(name_key = stri_trans_general(`Unidade da Federação`, "Latin-ASCII") |> tolower())
+
+map_df <- br_states %>%
+  left_join(pop_long, by = "name_key")
+
+```
+Finally, we bin shares into quintiles within each year (so the legend reflects the distribution in that year) and plot the three maps side-by-side.
+
+```{r}
+# =========================
+# Red outline: North + Center-West (merged geometry)
+# =========================
+north_cw_states_key <- stri_trans_general(
+  c(
+    "Acre", "Amapá", "Amazonas", "Pará", "Rondônia", "Roraima", "Tocantins",
+    "Mato Grosso", "Mato Grosso do Sul", "Goiás"
+  ),
+  "Latin-ASCII"
+) |> tolower()
+
+region_outline <- br_states %>%
+  mutate(name_key = stri_trans_general(name_state, "Latin-ASCII") |> tolower()) %>%
+  filter(name_key %in% north_cw_states_key) %>%
+  summarise() %>%
+  st_make_valid()
+
+region_outline_smooth <- rmapshaper::ms_simplify(region_outline, keep = 0.03, keep_shapes = TRUE)
+
+# =========================
+# Binning (fixed breaks across years)
+# =========================
+breaks <- quantile(map_df$pop_share, probs = seq(0, 1, 0.2), na.rm = TRUE)
+
+map_df <- map_df %>%
+  mutate(
+    pop_share_bin = cut(
+      pop_share,
+      breaks = breaks,
+      include.lowest = TRUE,
+      right = TRUE
+    )
+  )
+
+facet_labs <- c(`1950`="(a) 1950", `2000`="(b) 2000", `2010`="(c) 2010")
+
+# =========================
+# Plot
+# =========================
+p <- ggplot(map_df) +
+  geom_sf(aes(fill = pop_share_bin), color = "grey75", linewidth = 0.2) +
+  geom_sf(fill = NA, color = "grey20", linewidth = 0.25) +
+  
+  # red regional outline
+  geom_sf(
+    data = region_outline_smooth,
+    fill = NA,
+    color = "red",
+    linewidth = 1
+  ) +
+  
+  facet_wrap(~ year, nrow = 1, labeller = labeller(year = facet_labs)) +
+  scale_fill_brewer(palette = "Blues", na.value = "white", name = "Share") +
+  coord_sf(datum = NA) +
+  labs(
+    title = "Spatial Distribution of the Brazilian Population (by State)",
+    subtitle = "Population share by state (share computed within each year)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid = element_blank(),
+    axis.text = element_blank(),
+    axis.title = element_blank(),
+    legend.position = "bottom",
+    strip.text = element_text(size = 16),
+    plot.title = element_text(size = 18, face = "bold")
+  )
+
+print(p)
+
+ggsave("brazil_pop_share_states_1950_2000_2010.png", p, width = 14, height = 5, dpi = 300)
+
+```
+
+
+

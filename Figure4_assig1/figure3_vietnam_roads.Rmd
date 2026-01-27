@@ -121,7 +121,7 @@ map_2010 <- ggplot() +
 
 ## Final Figure
 ```{r}
-(map_2000 | map_2010) +
+fig4 <- ( map_2000 | map_2010) +
   plot_layout(guides = "collect") & 
   theme(
     legend.position = "bottom",
@@ -129,6 +129,8 @@ map_2010 <- ggplot() +
     legend.title = element_text(size = 11),
     legend.text = element_text(size = 10)
   )
+
+ggsave("fig4.png", fig4, width = 14, height = 5, dpi = 300)
 ```
 **Figure 3.** Road infrastructure in Vietnam in 2000 (approximation) and 2010 by road type.
 

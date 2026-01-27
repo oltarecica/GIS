@@ -1,0 +1,123 @@
+---
+title: "Hw2"
+output: html_document
+date: "2026-01-26"
+---
+
+```{r setup, include=FALSE}
+library(sf)
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+library(rmapshaper)
+
+no_axis <- theme(
+  axis.title = element_blank(),
+  axis.text  = element_blank(),
+  axis.ticks = element_blank()
+)
+
+theme_paper_map <- theme_minimal(base_size = 11) +
+  no_axis +
+  theme(
+    panel.grid.major = element_line(color = "grey92", linewidth = 0.25),
+    panel.grid.minor = element_blank(),
+    legend.position  = "right",
+    legend.title     = element_blank()
+  )
+
+```
+
+Here we used the same stucture and data from the paper, as it's was disponibiliized in the article 
+
+```{r pressure, echo=FALSE}
+secdata <- "/Users/felipe/Documents/BSE/Term-2/Geospatial.csv/hw1/183316-V1-2/Data/GIS_data"
+
+states <- st_read(file.path(secdata,"uf1940/uf1940_prj.shp"), quiet=TRUE)
+states_simple <- ms_simplify(states, keep = 0.01, keep_shapes = TRUE)
+
+year <- 2000
+file_name <- paste0(year,"/highways_",year,"_prj.shp")
+all_highways <- st_read(file.path(secdata, "roads", file_name), quiet=TRUE)
+all_highways_simple <- ms_simplify(all_highways, keep = 0.01, keep_shapes = TRUE)
+
+mst_pie <- st_read(file.path(secdata, "mst/mst_pie_prj.shp"), quiet=TRUE)
+mst_pie_simple <- ms_simplify(mst_pie, keep = 0.01, keep_shapes = TRUE)
+
+mst_all_rio <- st_read(file.path(secdata, "mst/mst_all_rio_prj.shp"), quiet=TRUE)
+mst_all_rio_simple <- ms_simplify(mst_all_rio, keep = 0.01, keep_shapes = TRUE)
+
+capital_cities <- st_read(file.path(secdata,"cities/brazil_capital_cities_prj.shp"), quiet=TRUE)
+
+# Harmoniza CRS (assume que todos já estão projetados como *_prj.shp,
+# mas garante que batem)
+target_crs <- st_crs(states_simple)
+
+all_highways_simple <- st_transform(all_highways_simple, target_crs)
+mst_pie_simple      <- st_transform(mst_pie_simple, target_crs)
+mst_all_rio_simple  <- st_transform(mst_all_rio_simple, target_crs)
+capital_cities      <- st_transform(capital_cities, target_crs)
+
+cities_xy <- cbind(capital_cities, st_coordinates(capital_cities)) %>%
+  st_drop_geometry()
+
+```
+
+```{r}
+# bbox baseada nos estados (mais estável)
+bb <- st_bbox(states_simple)
+
+# Se quiser “respirar” um pouco ao redor (paper tem margem)
+pad <- 0.02
+xpad <- (bb$xmax - bb$xmin) * pad
+ypad <- (bb$ymax - bb$ymin) * pad
+
+xlim <- c(bb$xmin - xpad, bb$xmax + xpad)
+ylim <- c(bb$ymin - ypad, bb$ymax + ypad)
+
+```
+
+```{r}
+roads_nonrad <- all_highways_simple %>% filter(dm_anlys_p == 1, dm_radial == 0) %>%
+  mutate(layer = "Non-radial highways (2000)")
+roads_rad <- all_highways_simple %>% filter(dm_anlys_p == 1, dm_radial == 1) %>%
+  mutate(layer = "Radial highways (2000)")
+mst_layer <- mst_pie_simple %>% mutate(layer = "Minimum spanning tree")
+
+fig_1 <- ggplot() +
+  geom_sf(data = states_simple, fill = "white", color = "grey90", linewidth = 0.25) +
+  geom_sf(data = roads_nonrad, aes(color = layer, linetype = layer), linewidth = 0.35) +
+  geom_sf(data = roads_rad,    aes(color = layer, linetype = layer), linewidth = 0.55) +
+  geom_sf(data = mst_layer,    aes(color = layer, linetype = layer), linewidth = 0.60) +
+  geom_point(data = cities_xy, aes(x = X, y = Y), size = 1.2) +
+  geom_text_repel(
+    data = cities_xy, aes(x = X, y = Y, label = CITY_NAME),
+    size = 3, min.segment.length = 0,
+    box.padding = 0.25, point.padding = 0.15,
+    seed = 1
+  ) +
+  coord_sf(xlim = xlim, ylim = ylim, expand = FALSE) +
+  scale_color_manual(
+    values = c(
+      "Minimum spanning tree"      = "grey20",
+      "Non-radial highways (2000)" = "grey55",
+      "Radial highways (2000)"     = "grey20"
+    )
+  ) +
+  scale_linetype_manual(
+    values = c(
+      "Minimum spanning tree"      = "dotted",
+      "Non-radial highways (2000)" = "dashed",
+      "Radial highways (2000)"     = "solid"
+    )
+  ) +
+  guides(
+    color = guide_legend(order = 1),
+    linetype = guide_legend(order = 1)
+  ) +
+  theme_paper_map
+print(fig_1)
+ggsave("roads_brazil.png", fig_1, width = 14, height = 5, dpi = 300)
+
+```
+

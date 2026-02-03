@@ -1,0 +1,281 @@
+---
+title: "Assignment 2 - Task 2"
+author: "Felipe Manzi, Yazmin Erika Blanco, Olsa Reçica, Olta Berani"
+date: "2026-02-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(sf)
+library(tidyverse)
+library(readxl)
+library(rnaturalearth)
+library(osmdata)
+```
+
+## Data Loading
+
+First, we load the market coordinates and price data.
+
+```{r load_data}
+## Coordinates
+coords <- read_excel(
+    "/Users/felipe/Documents/BSE/Term-2/Geospatial.csv/HW2/MktCoords.xlsx"
+)
+
+head(coords)
+
+## Prices
+prices <- read_excel(
+    "/Users/felipe/Documents/BSE/Term-2/Geospatial.csv/HW2/PriceMaster4GAMS.xlsx"
+)
+
+head(prices)
+```
+
+## Data Processing
+
+We convert the market data into an `sf` object and calculate average prices per market.
+
+```{r process_data}
+## Create market points
+markets_sf <- st_as_sf(
+    coords,
+    coords = c("longitude", "latitude"),
+    crs = 4326
+)
+
+## Compute average prices
+prices_long <- prices |>
+    pivot_longer(
+        cols = `1`:`144`,
+        names_to = "time",
+        values_to = "price"
+    )
+
+### Average per market
+avg_prices <- prices_long |>
+    group_by(mktcode) |>
+    summarise(
+        avg_price = mean(price, na.rm = TRUE)
+    )
+
+### Merge prices with spatial data
+markets_sf <- markets_sf |>
+    left_join(avg_prices, by = "mktcode")
+```
+
+## Spatial Features
+
+We download and process the coastline, roads, and airport data.
+
+```{r spatial_data, results='hide'}
+## Coast, roads and airport info
+
+africa <- ne_countries(
+    continent = "Africa",
+    returnclass = "sf"
+)
+
+### Coast
+coast <- ne_download(
+    scale = "medium",
+    type = "coastline",
+    category = "physical",
+    returnclass = "sf"
+)
+
+### Roads
+roads <- ne_download(
+    scale = 10,
+    type = "roads",
+    category = "cultural",
+    returnclass = "sf"
+)
+
+### Airports
+# Using Natural Earth to avoid Overpass timeouts
+airports <- ne_download(
+    scale = 10,
+    type = "airports",
+    category = "cultural",
+    returnclass = "sf"
+)
+
+## Cropping layers to Africa
+sf_use_s2(FALSE)
+
+africa_valid <- st_make_valid(africa)
+
+coast <- st_intersection(coast, africa_valid)
+roads <- st_intersection(roads, africa_valid)
+airports <- st_intersection(airports, africa_valid)
+```
+
+## Market Locations Map
+
+Here we visualize the market locations across Africa.
+
+```{r markets_map_code, eval=FALSE}
+ggplot() +
+    geom_sf(data = africa, fill = "gray95", color = "gray40", linewidth = 0.2) +
+    geom_sf(data = markets_sf, color = "red", size = 0.6, alpha = 0.7) +
+    labs(title = "Market locations in Africa", subtitle = "MktCoords.xlsx") +
+    theme_minimal()
+```
+
+```{r markets_map_run, include=FALSE}
+p_map <- ggplot() +
+    geom_sf(data = africa, fill = "gray95", color = "gray40", linewidth = 0.2) +
+    geom_sf(data = markets_sf, color = "red", size = 0.6, alpha = 0.7) +
+    labs(title = "Market locations in Africa", subtitle = "MktCoords.xlsx") +
+    theme_minimal()
+ggsave("plot_markets_map_africa.png", p_map, width = 8, height = 8, bg = "white")
+```
+
+```{r markets_map_show, echo=FALSE}
+knitr::include_graphics("plot_markets_map_africa.png")
+```
+
+## Distance Calculation
+
+We project all layers to a metric CRS (Web Mercator) and compute the minimum distance from each market to the nearest feature.
+
+```{r distances}
+## Project to meters
+crs_m <- 3857
+
+markets_p <- st_transform(markets_sf, crs_m)
+coast_p <- st_transform(coast, crs_m)
+roads_p <- st_transform(roads, crs_m)
+airports_p <- st_transform(airports, crs_m)
+
+## Computing minimum distances
+
+### Coast
+d_coast <- st_distance(markets_p, coast_p)
+min_coast <- apply(d_coast, 1, min)
+
+### Roads
+d_road <- st_distance(markets_p, roads_p)
+min_road <- apply(d_road, 1, min)
+
+### Airports
+d_air <- st_distance(markets_p, airports_p)
+min_air <- apply(d_air, 1, min)
+
+### Store distances (converted to km)
+markets_sf$dist_coast_km <- as.numeric(min_coast) / 1000
+markets_sf$dist_road_km <- as.numeric(min_road) / 1000
+markets_sf$dist_air_km <- as.numeric(min_air) / 1000
+```
+
+## Scatter Plots
+
+We now generate the scatter plots to analyze the relationship between price and distance.
+
+### Price vs Coast
+
+```{r coast_plot_code, eval=FALSE}
+ggplot(
+    markets_sf,
+    aes(dist_coast_km, avg_price)
+) +
+    geom_point(alpha = 0.5) +
+    geom_smooth(method = "lm") +
+    labs(
+        x = "Distance to Coast (km)",
+        y = "Average Price",
+        title = "Price vs Distance to Coast"
+    )
+```
+
+```{r coast_plot_run, include=FALSE}
+p1 <- ggplot(
+    markets_sf,
+    aes(dist_coast_km, avg_price)
+) +
+    geom_point(alpha = 0.5) +
+    geom_smooth(method = "lm") +
+    labs(
+        x = "Distance to Coast (km)",
+        y = "Average Price",
+        title = "Price vs Distance to Coast"
+    )
+ggsave("plot_coast.png", p1, width = 6, height = 4)
+```
+
+```{r coast_plot_show, echo=FALSE}
+knitr::include_graphics("plot_coast.png")
+```
+
+### Price vs Roads
+
+```{r road_plot_code, eval=FALSE}
+ggplot(
+    markets_sf,
+    aes(dist_road_km, avg_price)
+) +
+    geom_point(alpha = 0.5) +
+    geom_smooth(method = "lm") +
+    labs(
+        x = "Distance to Road (km)",
+        y = "Average Price",
+        title = "Price vs Distance to Road"
+    )
+```
+
+```{r road_plot_run, include=FALSE}
+p2 <- ggplot(
+    markets_sf,
+    aes(dist_road_km, avg_price)
+) +
+    geom_point(alpha = 0.5) +
+    geom_smooth(method = "lm") +
+    labs(
+        x = "Distance to Road (km)",
+        y = "Average Price",
+        title = "Price vs Distance to Road"
+    )
+ggsave("plot_roads.png", p2, width = 6, height = 4)
+```
+
+```{r road_plot_show, echo=FALSE}
+knitr::include_graphics("plot_roads.png")
+```
+
+### Price vs Airports
+
+```{r air_plot_code, eval=FALSE}
+ggplot(
+    markets_sf,
+    aes(dist_air_km, avg_price)
+) +
+    geom_point(alpha = 0.5) +
+    geom_smooth(method = "lm") +
+    labs(
+        x = "Distance to Airport (km)",
+        y = "Average Price",
+        title = "Price vs Distance to Airport"
+    )
+```
+
+```{r air_plot_run, include=FALSE}
+p3 <- ggplot(
+    markets_sf,
+    aes(dist_air_km, avg_price)
+) +
+    geom_point(alpha = 0.5) +
+    geom_smooth(method = "lm") +
+    labs(
+        x = "Distance to Airport (km)",
+        y = "Average Price",
+        title = "Price vs Distance to Airport"
+    )
+ggsave("plot_airports.png", p3, width = 6, height = 4)
+```
+
+```{r air_plot_show, echo=FALSE}
+knitr::include_graphics("plot_airports.png")
+```

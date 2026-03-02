@@ -1,0 +1,159 @@
+---
+title: "Take-home Assignment (2/2): Transportation Centrality and Isolation"
+Task: 2
+output: pdf_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+library(sf)
+library(terra)
+library(tidyverse)
+library(gdistance)
+library(raster)
+```
+
+
+1. We load the ne_10m_populated_places shapefile and filter to Spain. 
+We then rank cities by population and keep the top 10.
+```{r}
+# load country boundaries
+countries <- st_read("data/ne_10m_admin_0_countries.shp")
+# extract Spain polygon
+spain <- countries %>% filter(ADMIN == "Spain")
+# load populated places
+places <- st_read("data/ne_10m_populated_places.shp")
+# make sure CRS matches
+places <- st_transform(places, st_crs(spain))
+# filter places within Spain
+places_spain <- st_filter(places, spain)
+# get top 10 by population
+top10 <- places_spain %>%
+  arrange(desc(POP_MAX)) %>%
+  slice(1:10)
+print(top10 %>% st_drop_geometry() %>% dplyr::select(NAME, POP_MAX))
+# plot
+ggplot() +
+  geom_sf(data = spain) +
+  geom_sf(data = top10 %>% filter(!NAME %in% c("Madrid", "Vigo")), 
+          color = "gray40", size = 3) +
+  geom_sf(data = top10 %>% filter(NAME %in% c("Madrid", "Vigo")),
+          aes(color = NAME), size = 3) +
+  scale_color_manual(values = c("Madrid" = "#e63946", "Vigo" = "#2a9d8f")) +
+  labs(title = "Top 10 Populated Places in Spain", color = "NAME") +
+  theme_bw() +
+coord_sf(xlim = c(-10, 5), ylim = c(35.5, 44.5))
+```
+
+2. We load the gROADS-v1-europe road network and crop it 
+to Spain's boundary using st_intersection().
+```{r}
+# load gROADS Europe shapefile
+roads_europe <- st_read("data/gROADS-v1-europe.shp")
+
+# reproject to match Spain
+roads_europe <- st_transform(roads_europe, st_crs(spain))
+
+# crop roads to Spain
+roads_spain <- st_intersection(roads_europe, spain)
+
+# plot
+ggplot() +
+  geom_sf(data = spain) +
+  geom_sf(data = roads_spain, linewidth = 0.2, color = "gray30") +
+  geom_sf(data = top10, color = "red", size = 2) +
+  labs(title = "Road Network in Spain + Top 10 Cities") +
+  theme_bw() +
+coord_sf(xlim = c(-10, 5), ylim = c(35.5, 44.5))
+```
+3. We build a friction surface by rasterizing the road network. 
+Road cells get a cost of 1 and off-road cells get a cost of 100. 
+We then build a transition matrix and compute the full 10x10 
+bilateral distance matrix between all city pairs.
+```{r}
+# create raster template over Spain at 0.05 degree resolution
+r_template <- rast(ext(spain), res = 0.05, crs = "EPSG:4326")
+
+# rasterize roads: cells with roads = 1
+roads_rast <- rasterize(vect(roads_spain), r_template, field = 1)
+
+# assign friction: 1 on-road, 100 off-road
+fv <- values(roads_rast)
+fv[is.na(fv)] <- 100
+fv[fv == 1]   <- 1
+values(roads_rast) <- fv
+
+# mask to Spain only
+spain_mask <- rasterize(vect(spain), r_template, field = 1)
+roads_rast <- mask(roads_rast, spain_mask)
+
+# plot
+ext_spain <- c(-9.5, 4.5, 36, 44)
+plot(roads_rast, main = "Friction Surface (1 = road, 100 = off-road)", ext = ext_spain)
+plot(vect(spain), add = TRUE)
+```
+
+```{r}
+# convert to old raster format (required by gdistance)
+r_raster <- raster::raster(roads_rast)
+
+# build transition matrix (8 directions, mean function)
+tr_matrix <- transition(
+  x                  = r_raster,
+  transitionFunction = mean,
+  directions         = 8
+)
+
+# geocorrect for diagonal distances
+tr_matrix <- geoCorrection(tr_matrix, type = "c")
+```
+
+```{r}
+# compute full 10x10 cost-distance matrix
+dist_friction <- costDistance(
+  tr_matrix,
+  as(top10, "Spatial")
+) %>% as.matrix()
+
+rownames(dist_friction) <- top10$NAME
+colnames(dist_friction) <- top10$NAME
+
+# display matrix
+print(round(dist_friction, 0))
+```
+4. We compare cost distances from Madrid and Vigo to all other 
+cities using geom_density(). The city with the higher mean 
+distance is more isolated.
+
+```{r}
+# extract distances from Madrid and Vigo to all other cities
+madrid_idx <- which(rownames(dist_friction) == "Madrid")
+vigo_idx   <- which(rownames(dist_friction) == "Vigo")
+
+dist_df <- bind_rows(
+  tibble(city = "Madrid", distance = dist_friction[madrid_idx, -madrid_idx]),
+  tibble(city = "Vigo",   distance = dist_friction[vigo_idx,   -vigo_idx])
+)
+
+# density plot
+ggplot(dist_df, aes(x = distance, fill = city, color = city)) +
+  geom_density(alpha = 0.4, linewidth = 1) +
+  scale_fill_manual(values  = c("Madrid" = "#e63946", "Vigo" = "#2a9d8f")) +
+  scale_color_manual(values = c("Madrid" = "#e63946", "Vigo" = "#2a9d8f")) +
+  labs(
+    title    = "Transportation Isolation: Madrid vs. Vigo",
+    subtitle = "Friction-surface distances to the other top-10 cities",
+    x        = "Cost Distance",
+    y        = "Density",
+    fill     = "Origin City",
+    color    = "Origin City"
+  ) +
+  theme_bw()
+
+# conclusion
+cat("Mean distance from Madrid:", round(mean(dist_friction[madrid_idx, -madrid_idx]), 1),
+    "\nMean distance from Vigo:  ", round(mean(dist_friction[vigo_idx, -vigo_idx]), 1),
+    "\n\nVigo has a higher mean distance, meaning it is more isolated than Madrid.")
+```

@@ -1,0 +1,141 @@
+---
+title: "Q1-AssGeoSpatial"
+output: html_document
+date: "2026-03-02"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r cars}
+library(terra)
+library(sf)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(lubridate)
+```
+
+```{r pressure, echo=FALSE}
+# Load SPEI (NetCDF)
+spei <- rast("spei01.nc")
+
+# IMPORTANT: assign a proper monthly time index (SPEIbase is typically 1901-present)
+time(spei) <- seq.Date(from = as.Date("1901-01-01"), by = "month", length.out = nlyr(spei))
+
+# Crop to US bounding box (speeds up)
+spei_us <- crop(spei, ext(-125, -66, 24, 50))
+
+# Filter to last 50 years (edit as needed)
+spei_us <- spei_us[[ time(spei_us) >= as.Date("1975-01-01") & time(spei_us) <= as.Date("2025-12-01") ]]
+
+# Rename layers to dates so pivoting is robust
+names(spei_us) <- format(time(spei_us), "%Y-%m-%d")
+```
+
+```{r}
+states <- st_read("cb_2018_us_state_20m.shp", quiet = TRUE) |>
+  filter(!STUSPS %in% c("AK", "HI", "PR")) |>
+  st_transform(crs(spei_us))
+```
+
+
+```{r}
+region_map <- c(
+  # Northeast
+  CT="Northeast", ME="Northeast", MA="Northeast", NH="Northeast", RI="Northeast", VT="Northeast",
+  NJ="Northeast", NY="Northeast", PA="Northeast",
+  # Midwest
+  IL="Midwest", IN="Midwest", MI="Midwest", OH="Midwest", WI="Midwest",
+  IA="Midwest", KS="Midwest", MN="Midwest", MO="Midwest", NE="Midwest", ND="Midwest", SD="Midwest",
+  # South
+  DE="South", FL="South", GA="South", MD="South", NC="South", SC="South", VA="South", WV="South", DC="South",
+  AL="South", KY="South", MS="South", TN="South",
+  AR="South", LA="South", OK="South", TX="South",
+  # West (CONUS)
+  AZ="West", CO="West", ID="West", MT="West", NV="West", NM="West", UT="West", WY="West",
+  CA="West", OR="West", WA="West"
+)
+
+states$region <- unname(region_map[states$STUSPS])
+
+regions <- states |>
+  filter(!is.na(region)) |>
+  group_by(region) |>
+  summarise(geometry = st_union(geometry), .groups = "drop")
+
+regions_v <- vect(regions)
+```
+
+
+```{r}
+# Area-weighted mean SPEI by region
+reg_ex <- terra::extract(spei_us, regions_v, fun = mean, weights = TRUE, na.rm = TRUE)
+
+# Build panel: region x date x spei
+panel <- reg_ex |>
+  as.data.frame() |>
+  mutate(region = regions$region[ID]) |>
+  pivot_longer(
+    cols = -c(ID, region),
+    names_to = "date",
+    values_to = "spei"
+  ) |>
+  mutate(date = as.Date(date)) |>
+  select(region, date, spei) |>
+  arrange(region, date)
+
+# Yearly SPEI per region
+panel_year <- panel |>
+  mutate(year = year(date)) |>
+  group_by(region, year) |>
+  summarise(spei = mean(spei, na.rm = TRUE), .groups = "drop")
+```
+
+```{r}
+avg_year <- panel_year |>
+  group_by(year) |>
+  summarise(us_mean = mean(spei, na.rm = TRUE), .groups = "drop")
+```
+
+```{r}
+ggplot() +
+
+  # Regional yearly lines (no smooth, no CI)
+  geom_line(
+    data = panel_year,
+    aes(x = year, y = spei, color = region, group = region),
+    alpha = 0.6,
+    linewidth = 0.8
+  ) +
+
+
+  # US average smooth WITH confidence interval ribbon (transparent)
+  geom_smooth(
+    data = avg_year,
+    aes(x = year, y = us_mean),
+    method = "loess",        # or "gam" if you prefer
+    se = TRUE,
+    color = "black",
+    fill = "black",
+    alpha = 0.15,
+    linewidth = 1.3
+  ) +
+
+  labs(
+    x = "Year",
+    y = "Yearly SPEI",
+    color = "Region",
+    title = "Yearly SPEI by Region with Smoothed US Average (95% CI)"
+  ) +
+  theme_minimal()
+```
+
+
+
+
+
+
+

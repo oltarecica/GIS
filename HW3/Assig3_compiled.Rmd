@@ -1,0 +1,310 @@
+---
+title: "Assignment 3"
+author: "Erika Yazmin Blanco, Felipe Manzi, Olsa Reçica, Olta Berani"
+date: "2026-03-03"
+output:
+  pdf_document:
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Task 1
+
+```{r cars}
+library(terra)
+library(sf)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(lubridate)
+```
+
+```{r pressure, echo=FALSE}
+# Load SPEI (NetCDF)
+spei <- rast("spei01.nc")
+
+# IMPORTANT: assign a proper monthly time index (SPEIbase is typically 1901-present)
+time(spei) <- seq.Date(from = as.Date("1901-01-01"), by = "month", length.out = nlyr(spei))
+
+# Crop to US bounding box (speeds up)
+spei_us <- crop(spei, ext(-125, -66, 24, 50))
+
+# Filter to last 50 years (edit as needed)
+spei_us <- spei_us[[ time(spei_us) >= as.Date("1975-01-01") & time(spei_us) <= as.Date("2025-12-01") ]]
+
+# Rename layers to dates so pivoting is robust
+names(spei_us) <- format(time(spei_us), "%Y-%m-%d")
+```
+
+```{r}
+states <- st_read("cb_2018_us_state_20m.shp", quiet = TRUE) |>
+  filter(!STUSPS %in% c("AK", "HI", "PR")) |>
+  st_transform(crs(spei_us))
+```
+
+
+```{r}
+region_map <- c(
+  # Northeast
+  CT="Northeast", ME="Northeast", MA="Northeast", NH="Northeast", RI="Northeast", VT="Northeast",
+  NJ="Northeast", NY="Northeast", PA="Northeast",
+  # Midwest
+  IL="Midwest", IN="Midwest", MI="Midwest", OH="Midwest", WI="Midwest",
+  IA="Midwest", KS="Midwest", MN="Midwest", MO="Midwest", NE="Midwest", ND="Midwest", SD="Midwest",
+  # South
+  DE="South", FL="South", GA="South", MD="South", NC="South", SC="South", VA="South", WV="South", DC="South",
+  AL="South", KY="South", MS="South", TN="South",
+  AR="South", LA="South", OK="South", TX="South",
+  # West (CONUS)
+  AZ="West", CO="West", ID="West", MT="West", NV="West", NM="West", UT="West", WY="West",
+  CA="West", OR="West", WA="West"
+)
+
+states$region <- unname(region_map[states$STUSPS])
+
+regions <- states |>
+  filter(!is.na(region)) |>
+  group_by(region) |>
+  summarise(geometry = st_union(geometry), .groups = "drop")
+
+regions_v <- vect(regions)
+```
+
+
+```{r}
+# Area-weighted mean SPEI by region
+reg_ex <- terra::extract(spei_us, regions_v, fun = mean, weights = TRUE, na.rm = TRUE)
+
+# Build panel: region x date x spei
+panel <- reg_ex |>
+  as.data.frame() |>
+  mutate(region = regions$region[ID]) |>
+  pivot_longer(
+    cols = -c(ID, region),
+    names_to = "date",
+    values_to = "spei"
+  ) |>
+  mutate(date = as.Date(date)) |>
+  select(region, date, spei) |>
+  arrange(region, date)
+
+# Yearly SPEI per region
+panel_year <- panel |>
+  mutate(year = year(date)) |>
+  group_by(region, year) |>
+  summarise(spei = mean(spei, na.rm = TRUE), .groups = "drop")
+```
+
+```{r}
+avg_year <- panel_year |>
+  group_by(year) |>
+  summarise(us_mean = mean(spei, na.rm = TRUE), .groups = "drop")
+```
+
+```{r}
+ggplot() +
+
+  # Regional yearly lines (no smooth, no CI)
+  geom_line(
+    data = panel_year,
+    aes(x = year, y = spei, color = region, group = region),
+    alpha = 0.6,
+    linewidth = 0.8
+  ) +
+
+
+  # US average smooth WITH confidence interval ribbon (transparent)
+  geom_smooth(
+    data = avg_year,
+    aes(x = year, y = us_mean),
+    method = "loess",        # or "gam" if you prefer
+    se = TRUE,
+    color = "black",
+    fill = "black",
+    alpha = 0.15,
+    linewidth = 1.3
+  ) +
+
+  labs(
+    x = "Year",
+    y = "Yearly SPEI",
+    color = "Region",
+    title = "Yearly SPEI by Region with Smoothed US Average (95% CI)"
+  ) +
+  theme_minimal()
+```
+
+# Task 2
+
+```{r libraries}
+library(sf)
+library(terra)
+library(tidyverse)
+library(gdistance)
+library(raster)
+```
+
+
+1. We load the ne_10m_populated_places shapefile and filter to Spain. 
+We then rank cities by population and keep the top 10.
+```{r}
+# load country boundaries
+countries <- st_read("data/ne_10m_admin_0_countries.shp")
+# extract Spain polygon
+spain <- countries %>% filter(ADMIN == "Spain")
+# load populated places
+places <- st_read("data/ne_10m_populated_places.shp")
+# make sure CRS matches
+places <- st_transform(places, st_crs(spain))
+# filter places within Spain
+places_spain <- st_filter(places, spain)
+# get top 10 by population
+top10 <- places_spain %>%
+  arrange(desc(POP_MAX)) %>%
+  slice(1:10)
+print(top10 %>% st_drop_geometry() %>% dplyr::select(NAME, POP_MAX))
+# plot
+ggplot() +
+  geom_sf(data = spain) +
+  geom_sf(data = top10 %>% filter(!NAME %in% c("Madrid", "Vigo")), 
+          color = "gray40", size = 3) +
+  geom_sf(data = top10 %>% filter(NAME %in% c("Madrid", "Vigo")),
+          aes(color = NAME), size = 3) +
+  scale_color_manual(values = c("Madrid" = "#e63946", "Vigo" = "#2a9d8f")) +
+  labs(title = "Top 10 Populated Places in Spain", color = "NAME") +
+  theme_bw() +
+coord_sf(xlim = c(-10, 5), ylim = c(35.5, 44.5))
+```
+
+2. We load the gROADS-v1-europe road network and crop it 
+to Spain's boundary using st_intersection().
+```{r}
+# load gROADS Europe shapefile
+roads_europe <- st_read("data/gROADS-v1-europe.shp")
+
+# reproject to match Spain
+roads_europe <- st_transform(roads_europe, st_crs(spain))
+
+# crop roads to Spain
+roads_spain <- st_intersection(roads_europe, spain)
+
+# plot
+ggplot() +
+  geom_sf(data = spain) +
+  geom_sf(data = roads_spain, linewidth = 0.2, color = "gray30") +
+  geom_sf(data = top10, color = "red", size = 2) +
+  labs(title = "Road Network in Spain + Top 10 Cities") +
+  theme_bw() +
+coord_sf(xlim = c(-10, 5), ylim = c(35.5, 44.5))
+```
+
+3. We build a friction surface by rasterizing the road network. 
+Road cells get a cost of 1 and off-road cells get a cost of 100. 
+We then build a transition matrix and compute the full 10x10 
+bilateral distance matrix between all city pairs.
+```{r}
+# convert Spain to terra vector
+spain_vect <- vect(spain)
+
+# create raster template over Spain at 0.05 degree resolution
+r_template <- rast(spain_vect, res = 0.05)
+
+# rasterize roads: cells with roads = 1
+roads_rast <- rasterize(vect(roads_spain), r_template, field = 1)
+
+# assign friction: 1 on-road, 100 off-road
+fv <- values(roads_rast)
+fv[is.na(fv)] <- 100
+fv[fv == 1]   <- 1
+values(roads_rast) <- fv
+
+# mask to Spain only
+spain_mask <- rasterize(vect(spain), r_template, field = 1)
+roads_rast <- mask(roads_rast, spain_mask)
+
+# plot
+ext_spain <- c(-9.5, 4.5, 36, 44)
+plot(roads_rast, main = "Friction Surface (1 = road, 100 = off-road)", ext = ext_spain)
+plot(spain_vect, add = TRUE)
+```
+
+```{r}
+# convert to old raster format (required by gdistance)
+r_raster <- raster::raster(roads_rast)
+
+# build transition matrix (8 directions, mean function)
+tr_matrix <- transition(
+  x                  = r_raster,
+  transitionFunction = mean,
+  directions         = 8
+)
+
+# geocorrect for diagonal distances
+tr_matrix <- geoCorrection(tr_matrix, type = "c")
+```
+
+```{r}
+# compute full 10x10 cost-distance matrix
+dist_friction <- costDistance(
+  tr_matrix,
+  as(top10, "Spatial")
+) %>% as.matrix()
+
+rownames(dist_friction) <- top10$NAME
+colnames(dist_friction) <- top10$NAME
+
+# display matrix
+print(round(dist_friction, 0))
+```
+
+4. We compare cost distances from Madrid and Vigo to all other 
+cities using geom_density(). The city with the higher mean 
+distance is more isolated.
+
+```{r}
+# extract distances from Madrid and Vigo to all other cities
+madrid_idx <- which(rownames(dist_friction) == "Madrid")
+vigo_idx   <- which(rownames(dist_friction) == "Vigo")
+
+dist_df <- bind_rows(
+  tibble(city = "Madrid", distance = dist_friction[madrid_idx, -madrid_idx]),
+  tibble(city = "Vigo",   distance = dist_friction[vigo_idx,   -vigo_idx])
+)
+
+# dynamic x-axis upper limit
+max_val <- ceiling(max(dist_df$distance) / 100) * 100
+# density plot
+ggplot(dist_df, aes(x = distance, fill = city, color = city)) +
+  geom_density(alpha = 0.4, linewidth = 1) +
+  scale_fill_manual(values = c("Madrid" = "#e63946", 
+                               "Vigo"   = "#2a9d8f")) +
+  scale_color_manual(values = c("Madrid" = "#e63946", 
+                                "Vigo"   = "#2a9d8f")) +
+  scale_x_continuous(
+    limits = c(0, max_val),
+    breaks = seq(0, max_val, by = 1800),
+    expand = c(0, 0)
+  ) +
+  labs(
+    title    = "Transportation Isolation: Madrid vs. Vigo",
+    subtitle = "Friction-surface distances to the other top-10 cities",
+    x        = "Cost Distance",
+    y        = "Density",
+    fill     = "Origin City",
+    color    = "Origin City"
+  ) +
+  theme_bw()
+
+# conclusion
+m_madrid <- round(mean(dist_friction[madrid_idx, -madrid_idx]), 1)
+m_vigo   <- round(mean(dist_friction[vigo_idx, -vigo_idx]), 1)
+
+cat("Mean distance from Madrid:", m_madrid, "\n")
+cat("Mean distance from Vigo:", m_vigo, "\n\n")
+cat("Vigo has a higher average friction-surface distance to the other top-10 cities,\n",
+    "indicating greater transportation isolation relative to Madrid.")
+```
+

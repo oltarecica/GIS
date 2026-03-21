@@ -1,0 +1,424 @@
+```{r}
+library(tidyverse)
+library(sf)
+library(readxl)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(stringr)
+
+dir.create("data/clean", recursive = TRUE, showWarnings = FALSE)
+
+study_countries <- c(
+  "Saudi Arabia", "Iraq", "Iran", "Kuwait",
+  "United Arab Emirates", "Qatar", "Syria", "Yemen"
+)
+
+save_dual_crs <- function(sf_obj, file_path) {
+  saveRDS(
+    list(
+      crs_4326 = st_transform(sf_obj, 4326),
+      crs_3857 = st_transform(sf_obj, 3857)
+    ),
+    file_path
+  )
+}
+
+# =============================================================================
+# 1. ACLED
+# =============================================================================
+
+acled_raw <- read_xlsx("data/Middle-East_aggregated_data_up_to-2026-03-07.xlsx")
+
+acled_clean <- acled_raw %>%
+  filter(COUNTRY %in% study_countries) %>%
+  mutate(
+    WEEK = as.Date(WEEK)
+  ) %>%
+  filter(
+    !is.na(CENTROID_LONGITUDE),
+    !is.na(CENTROID_LATITUDE)
+  ) %>%
+  st_as_sf(
+    coords = c("CENTROID_LONGITUDE", "CENTROID_LATITUDE"),
+    crs = 4326,
+    remove = FALSE
+  )
+
+save_dual_crs(acled_clean, "data/clean/acled_clean.rds")
+
+cat(
+  "✓ ACLED:",
+  nrow(acled_clean), "rows across",
+  n_distinct(acled_clean$COUNTRY), "countries\n"
+)
+
+# =============================================================================
+# 2. GEM — Oil / NGL Pipelines
+# =============================================================================
+
+gem_raw <- read_xlsx("data/GEM-GOIT-Oil-NGL-Pipelines-2025-03.xlsx")
+
+gem_clean <- gem_raw %>%
+  filter(
+    str_detect(
+      coalesce(Countries, ""),
+      regex(str_c(study_countries, collapse = "|"), ignore_case = TRUE)
+    ) |
+      StartCountry %in% study_countries |
+      EndCountry %in% study_countries
+  )
+
+saveRDS(gem_clean, "data/clean/gem_clean.rds")
+
+cat("✓ GEM:", nrow(gem_clean), "rows saved\n")
+
+# =============================================================================
+# 3. Natural Earth populated places
+# =============================================================================
+
+places_raw <- ne_download(
+  scale = 10,
+  type = "populated_places",
+  category = "cultural",
+  returnclass = "sf"
+)
+
+# Check names(places_raw) if this ever fails in your environment
+places_clean <- places_raw %>%
+  filter(ADM0NAME %in% study_countries)
+
+save_dual_crs(places_clean, "data/clean/places_clean.rds")
+
+cat("✓ Populated places:", nrow(places_clean), "rows saved\n")
+
+# =============================================================================
+# 4. Natural Earth country boundaries
+# =============================================================================
+
+countries_raw <- ne_download(
+  scale = 10,
+  type = "admin_0_countries",
+  category = "cultural",
+  returnclass = "sf"
+)
+
+countries_clean <- countries_raw %>%
+  filter(ADMIN %in% study_countries)
+
+save_dual_crs(countries_clean, "data/clean/countries_clean.rds")
+
+cat("✓ Country boundaries:", nrow(countries_clean), "rows saved\n")
+
+# =============================================================================
+# 5. Example load for teammates
+# =============================================================================
+
+# ACLED
+acled_obj <- readRDS("data/clean/acled_clean.rds")
+acled_4326 <- acled_obj$crs_4326
+acled_3857 <- acled_obj$crs_3857
+
+# Places
+places_obj <- readRDS("data/clean/places_clean.rds")
+places_4326 <- places_obj$crs_4326
+places_3857 <- places_obj$crs_3857
+
+# Countries
+countries_obj <- readRDS("data/clean/countries_clean.rds")
+countries_4326 <- countries_obj$crs_4326
+countries_3857 <- countries_obj$crs_3857
+
+# GEM
+gem_clean <- readRDS("data/clean/gem_clean.rds")
+```
+```{r}
+library(tidyverse)
+library(sf)
+library(lubridate)
+
+# =============================================================================
+# 1. Load cleaned data
+# =============================================================================
+
+acled_obj <- readRDS("data/clean/acled_clean.rds")
+places_obj <- readRDS("data/clean/places_clean.rds")
+countries_obj <- readRDS("data/clean/countries_clean.rds")
+gem_clean <- readRDS("data/clean/gem_clean.rds")
+
+acled_4326 <- acled_obj$crs_4326
+acled_3857 <- acled_obj$crs_3857
+
+places_4326 <- places_obj$crs_4326
+places_3857 <- places_obj$crs_3857
+
+countries_4326 <- countries_obj$crs_4326
+countries_3857 <- countries_obj$crs_3857
+
+# =============================================================================
+# 2. Basic checks
+# =============================================================================
+
+cat("========== BASIC CHECKS ==========\n\n")
+
+cat("ACLED object class:\n")
+print(class(acled_4326))
+cat("\n")
+
+cat("Places object class:\n")
+print(class(places_4326))
+cat("\n")
+
+cat("Countries object class:\n")
+print(class(countries_4326))
+cat("\n")
+
+cat("GEM object class:\n")
+print(class(gem_clean))
+cat("\n")
+
+cat("ACLED CRS:", st_crs(acled_4326)$epsg, "\n")
+cat("Places CRS:", st_crs(places_4326)$epsg, "\n")
+cat("Countries CRS:", st_crs(countries_4326)$epsg, "\n\n")
+
+cat("ACLED rows:", nrow(acled_4326), "\n")
+cat("Places rows:", nrow(places_4326), "\n")
+cat("Countries rows:", nrow(countries_4326), "\n")
+cat("GEM rows:", nrow(gem_clean), "\n\n")
+
+cat("Countries in ACLED:\n")
+print(sort(unique(acled_4326$COUNTRY)))
+cat("\n")
+
+cat("Countries in boundaries:\n")
+print(sort(unique(countries_4326$ADMIN)))
+cat("\n")
+
+cat("Countries in places:\n")
+print(sort(unique(places_4326$ADM0NAME)))
+cat("\n")
+
+# =============================================================================
+# 3. Period available for ACLED
+# =============================================================================
+
+cat("========== ACLED TIME COVERAGE ==========\n\n")
+
+cat("Min week:", as.character(min(acled_4326$WEEK, na.rm = TRUE)), "\n")
+cat("Max week:", as.character(max(acled_4326$WEEK, na.rm = TRUE)), "\n")
+cat("Number of unique weeks:", n_distinct(acled_4326$WEEK), "\n\n")
+
+acled_year_summary <- acled_4326 %>%
+  st_drop_geometry() %>%
+  mutate(year = year(WEEK)) %>%
+  group_by(year) %>%
+  summarise(
+    rows = n(),
+    events = sum(EVENTS, na.rm = TRUE),
+    fatalities = sum(FATALITIES, na.rm = TRUE)
+  ) %>%
+  arrange(year)
+
+print(acled_year_summary)
+
+# =============================================================================
+# 4. Country-level summaries
+# =============================================================================
+
+cat("\n========== COUNTRY SUMMARIES ==========\n\n")
+
+country_summary <- acled_4326 %>%
+  st_drop_geometry() %>%
+  group_by(COUNTRY) %>%
+  summarise(
+    rows = n(),
+    total_events = sum(EVENTS, na.rm = TRUE),
+    total_fatalities = sum(FATALITIES, na.rm = TRUE),
+    first_week = min(WEEK, na.rm = TRUE),
+    last_week = max(WEEK, na.rm = TRUE),
+    n_admin1 = n_distinct(ADMIN1)
+  ) %>%
+  arrange(desc(total_events))
+
+print(country_summary)
+
+# =============================================================================
+# 5. Event type summaries
+# =============================================================================
+
+cat("\n========== EVENT TYPE SUMMARIES ==========\n\n")
+
+event_type_summary <- acled_4326 %>%
+  st_drop_geometry() %>%
+  group_by(EVENT_TYPE) %>%
+  summarise(
+    total_events = sum(EVENTS, na.rm = TRUE),
+    total_fatalities = sum(FATALITIES, na.rm = TRUE),
+    rows = n()
+  ) %>%
+  arrange(desc(total_events))
+
+print(event_type_summary)
+
+sub_event_summary <- acled_4326 %>%
+  st_drop_geometry() %>%
+  group_by(SUB_EVENT_TYPE) %>%
+  summarise(
+    total_events = sum(EVENTS, na.rm = TRUE),
+    total_fatalities = sum(FATALITIES, na.rm = TRUE),
+    rows = n()
+  ) %>%
+  arrange(desc(total_events))
+
+print(head(sub_event_summary, 15))
+
+# =============================================================================
+# 6. GEM quick checks
+# =============================================================================
+
+cat("\n========== GEM CHECKS ==========\n\n")
+
+cat("Unique fuel types:\n")
+print(sort(unique(gem_clean$Fuel)))
+cat("\n")
+
+gem_country_summary <- gem_clean %>%
+  mutate(
+    country_focus = case_when(
+      StartCountry %in% countries_4326$ADMIN ~ StartCountry,
+      EndCountry %in% countries_4326$ADMIN ~ EndCountry,
+      TRUE ~ Countries
+    )
+  ) %>%
+  count(country_focus, sort = TRUE)
+
+print(gem_country_summary)
+
+gem_status_summary <- gem_clean %>%
+  count(Status, sort = TRUE)
+
+print(gem_status_summary)
+
+# =============================================================================
+# 7. Simple plots
+# =============================================================================
+
+theme_set(theme_minimal())
+
+# 7.1 Events per country
+p1 <- acled_4326 %>%
+  st_drop_geometry() %>%
+  group_by(COUNTRY) %>%
+  summarise(total_events = sum(EVENTS, na.rm = TRUE)) %>%
+  ggplot(aes(x = reorder(COUNTRY, total_events), y = total_events)) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = "Total ACLED Events by Country",
+    x = NULL,
+    y = "Total events"
+  )
+
+print(p1)
+
+# 7.2 Fatalities per country
+p2 <- acled_4326 %>%
+  st_drop_geometry() %>%
+  group_by(COUNTRY) %>%
+  summarise(total_fatalities = sum(FATALITIES, na.rm = TRUE)) %>%
+  ggplot(aes(x = reorder(COUNTRY, total_fatalities), y = total_fatalities)) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = "Total Fatalities by Country",
+    x = NULL,
+    y = "Total fatalities"
+  )
+
+print(p2)
+
+# 7.3 Weekly events over time
+p3 <- acled_4326 %>%
+  st_drop_geometry() %>%
+  group_by(WEEK) %>%
+  summarise(total_events = sum(EVENTS, na.rm = TRUE)) %>%
+  ggplot(aes(x = WEEK, y = total_events)) +
+  geom_line() +
+  labs(
+    title = "Weekly Conflict Events Over Time",
+    x = "Week",
+    y = "Total events"
+  )
+
+print(p3)
+
+# 7.4 Weekly events by country
+p4 <- acled_4326 %>%
+  st_drop_geometry() %>%
+  group_by(WEEK, COUNTRY) %>%
+  summarise(total_events = sum(EVENTS, na.rm = TRUE), .groups = "drop") %>%
+  ggplot(aes(x = WEEK, y = total_events)) +
+  geom_line() +
+  facet_wrap(~ COUNTRY, scales = "free_y") +
+  labs(
+    title = "Weekly Conflict Events by Country",
+    x = "Week",
+    y = "Total events"
+  )
+
+print(p4)
+
+# 7.5 Event type totals
+p5 <- acled_4326 %>%
+  st_drop_geometry() %>%
+  group_by(EVENT_TYPE) %>%
+  summarise(total_events = sum(EVENTS, na.rm = TRUE)) %>%
+  ggplot(aes(x = reorder(EVENT_TYPE, total_events), y = total_events)) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = "Total Events by Event Type",
+    x = NULL,
+    y = "Total events"
+  )
+
+print(p5)
+
+# =============================================================================
+# 8. Simple maps
+# =============================================================================
+
+# 8.1 Boundaries + populated places + ACLED points
+p6 <- ggplot() +
+  geom_sf(data = countries_4326, fill = NA) +
+  geom_sf(data = places_4326, size = 0.7, alpha = 0.6) +
+  geom_sf(data = acled_4326, size = 0.4, alpha = 0.25) +
+  labs(
+    title = "Study Area: Countries, Cities, and ACLED Conflict Points"
+  )
+
+print(p6)
+
+# 8.2 ACLED points by country
+p7 <- ggplot() +
+  geom_sf(data = countries_4326, fill = NA) +
+  geom_sf(data = acled_4326, aes(color = COUNTRY), size = 0.4, alpha = 0.35) +
+  labs(
+    title = "ACLED Conflict Points by Country",
+    color = "Country"
+  )
+
+print(p7)
+
+# =============================================================================
+# 9. Optional: save plots
+# =============================================================================
+
+# ggsave("outputs/events_by_country.png", p1, width = 8, height = 5, dpi = 300)
+# ggsave("outputs/fatalities_by_country.png", p2, width = 8, height = 5, dpi = 300)
+# ggsave("outputs/weekly_events_over_time.png", p3, width = 9, height = 5, dpi = 300)
+# ggsave("outputs/weekly_events_by_country.png", p4, width = 10, height = 7, dpi = 300)
+# ggsave("outputs/events_by_type.png", p5, width = 9, height = 5, dpi = 300)
+# ggsave("outputs/map_overview.png", p6, width = 9, height = 6, dpi = 300)
+# ggsave("outputs/map_acled_by_country.png", p7, width = 9, height = 6, dpi = 300)
+```
+

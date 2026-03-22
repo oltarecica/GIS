@@ -56,7 +56,8 @@ cat(
 # 2. GEM — Oil / NGL Pipelines
 # =============================================================================
 
-gem_raw <- read_xlsx("data/GEM-GOIT-Oil-NGL-Pipelines-2025-03.xlsx")
+
+gem_raw <- st_read("data/GEM-GOIT-Oil-NGL-Pipelines-2025-03.geojson")
 
 gem_clean <- gem_raw %>%
   filter(
@@ -66,11 +67,25 @@ gem_clean <- gem_raw %>%
     ) |
       StartCountry %in% study_countries |
       EndCountry %in% study_countries
-  )
+  ) %>%
+  filter(!st_is_empty(geometry)) %>%        # drop the 457 empty geometries
+  st_transform(4326) %>%                    # ensure CRS is 4326
+  select(ProjectID, PipelineName, Countries, Status,
+         Capacity, CapacityUnits, LengthMergedKm,
+         StartLocation, StartCountry,
+         EndLocation,   EndCountry,
+         RouteType, RouteAccuracy, LastUpdated,
+         geometry)
+
+# projected version for distance calculations
+gem_3857 <- st_transform(gem_clean, 3857)
 
 saveRDS(gem_clean, "data/clean/gem_clean.rds")
+saveRDS(gem_3857,  "data/clean/gem_3857.rds")
 
-cat("✓ GEM:", nrow(gem_clean), "rows saved\n")
+cat("✓ GEM:", nrow(gem_clean), "pipelines |",
+    n_distinct(gem_clean$Countries), "country entries\n")
+cat("✓ CRS:", st_crs(gem_clean)$epsg, "\n")
 
 # =============================================================================
 # 3. Natural Earth populated places
@@ -409,6 +424,36 @@ p7 <- ggplot() +
 
 print(p7)
 
+# 8.3 GEM pipelines
+p8 <- ggplot() +
+  geom_sf(data = countries_4326, fill = "grey95", color = "grey60", linewidth = 0.3) +
+  geom_sf(data = gem_clean, aes(color = Status), linewidth = 0.6, alpha = 0.8) +
+  scale_color_manual(values = c(
+    "operating"   = "#1D9E75",
+    "proposed"    = "#378ADD",
+    "construction"= "#EF9F27",
+    "cancelled"   = "#E24B4A",
+    "shelved"     = "#888780"
+  )) +
+  labs(
+    title = "Oil & Gas Pipelines — Global Energy Monitor",
+    color = "Status"
+  ) +
+  theme_minimal()
+print(p8)
+
+# 8.4 GEM pipelines + ACLED conflict points together
+p9 <- ggplot() +
+  geom_sf(data = countries_4326, fill = "grey95", color = "grey60", linewidth = 0.3) +
+  geom_sf(data = gem_clean, color = "#1D9E75", linewidth = 0.6, alpha = 0.7) +
+  geom_sf(data = acled_4326, aes(color = EVENT_TYPE), size = 0.4, alpha = 0.4) +
+  labs(
+    title = "Pipelines and Conflict Events",
+    color = "Event type"
+  ) +
+  theme_minimal()
+print(p9)
+
 # =============================================================================
 # 9. Optional: save plots
 # =============================================================================
@@ -420,5 +465,11 @@ print(p7)
 # ggsave("outputs/events_by_type.png", p5, width = 9, height = 5, dpi = 300)
 # ggsave("outputs/map_overview.png", p6, width = 9, height = 6, dpi = 300)
 # ggsave("outputs/map_acled_by_country.png", p7, width = 9, height = 6, dpi = 300)
+```
+```{r}
+gem_raw <- st_read("data/GEM-GOIT-Oil-NGL-Pipelines-2025-03.geojson")
+
+glimpse(gem_raw)
+names(gem_raw)
 ```
 

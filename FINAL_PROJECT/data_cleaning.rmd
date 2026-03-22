@@ -106,6 +106,49 @@ save_dual_crs(places_clean, "data/clean/places_clean.rds")
 
 cat("✓ Populated places:", nrow(places_clean), "rows saved\n")
 
+##### EXTRA FOR PLANT EXTRACTION
+gogpt_raw <- read_xlsx(
+  "data/Global-Oil-and-Gas-Plant-Tracker-GOGPT-January-2026.xlsx",
+  sheet = "Gas & Oil Units"
+)
+
+gogpt_clean <- gogpt_raw %>%
+  rename(
+    Country        = `Country/Area`,
+    PlantName      = `Plant name`,
+    UnitName       = `Unit name`,
+    CapacityMW     = `Capacity (MW)`,
+    StartYear      = `Start year`,
+    RetiredYear    = `Retired year`,
+    Operators      = `Operator(s)`,
+    Owners         = `Owner(s)`,
+    StateProvince  = `State/Province`,
+    LocationAcc    = `Location accuracy`,
+    FuelClass      = `Fuel classification?`,
+    GEM_UnitID     = `GEM unit ID`,
+    GEM_LocationID = `GEM location ID`
+  ) %>%
+  filter(Country %in% study_countries) %>%
+  drop_na(Latitude, Longitude) %>%
+  st_as_sf(coords = c("Longitude", "Latitude"), crs = 4326, remove = FALSE) %>%
+  select(GEM_UnitID, GEM_LocationID, PlantName, UnitName, Country,
+         Fuel, FuelClass, CapacityMW, Status, StartYear, RetiredYear,
+         Operators, Owners, StateProvince, City,
+         LocationAcc, Latitude, Longitude, geometry)
+
+# projected version for distance calculations
+gogpt_3857 <- st_transform(gogpt_clean, 3857)
+
+saveRDS(gogpt_clean, "data/clean/gogpt_clean.rds")
+saveRDS(gogpt_3857,  "data/clean/gogpt_3857.rds")
+
+cat("✓ GOGPT:", nrow(gogpt_clean), "units |",
+    n_distinct(gogpt_clean$Country), "countries\n")
+cat("  Status breakdown:\n")
+print(count(gogpt_clean %>% st_drop_geometry(), Status, sort = TRUE))
+cat("  Fuel breakdown:\n")
+print(count(gogpt_clean %>% st_drop_geometry(), FuelClass, sort = TRUE))
+
 # =============================================================================
 # 4. Natural Earth country boundaries
 # =============================================================================
@@ -453,6 +496,26 @@ p9 <- ggplot() +
   ) +
   theme_minimal()
 print(p9)
+p10 <- ggplot() +
+  geom_sf(data = countries_4326,  fill = "grey95", color = "grey60", linewidth = 0.3) +
+  geom_sf(data = gem_clean,       color = "#1D9E75", linewidth = 0.6, alpha = 0.7) +
+  geom_sf(data = gogpt_clean,     aes(color = Status), size = 2, alpha = 0.8) +
+  scale_color_manual(values = c(
+    "operating"        = "#D85A30",
+    "proposed"         = "#378ADD",
+    "pre-construction" = "#EF9F27",
+    "announced"        = "#888780",
+    "construction"     = "#BA7517",
+    "retired"          = "#B4B2A9",
+    "shelved"          = "#5F5E5A",
+    "cancelled"        = "#E24B4A"
+  )) +
+  coord_sf(xlim = c(34, 62), ylim = c(12, 38)) +
+  labs(title  = "Oil & Gas Infrastructure — Pipelines and Plants",
+       color  = "Plant status") +
+  theme_minimal()
+
+print(p10)
 
 # =============================================================================
 # 9. Optional: save plots
@@ -467,9 +530,12 @@ print(p9)
 # ggsave("outputs/map_acled_by_country.png", p7, width = 9, height = 6, dpi = 300)
 ```
 ```{r}
-gem_raw <- st_read("data/GEM-GOIT-Oil-NGL-Pipelines-2025-03.geojson")
+# ── load plant tracker (points) ───────────────────────────────────────────────
+gogpt_raw <- read_xlsx("data/Global-Oil-and-Gas-Plant-Tracker-GOGPT-January-2026.xlsx",
+                        sheet = "Gas & Oil Units")
 
-glimpse(gem_raw)
-names(gem_raw)
+# inspect first
+glimpse(gogpt_raw)
+names(gogpt_raw)
 ```
 

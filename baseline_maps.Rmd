@@ -1,0 +1,143 @@
+---
+title: "Baseline Maps: Oil Infrastructure & Armed Conflict in the Middle East"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = TRUE,
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+```{r load}
+library(sf)
+library(ggplot2)
+library(ggdensity)
+
+conflict_list  <- readRDS("data/clean/acled_clean.rds")
+conflict       <- conflict_list$crs_4326
+
+countries_list <- readRDS("data/clean/countries_clean.rds")
+countries      <- countries_list$crs_4326
+
+gem   <- readRDS("data/clean/gem_clean.rds")
+gogpt <- readRDS("data/clean/gogpt_clean.rds")
+```
+
+```{r map1}
+legend_data1 <- data.frame(
+  x = c(0),
+  y = c(0),
+  type = c("Conflict Events")
+)
+
+ggplot() +
+  geom_sf(data = countries, fill = "#f5f0e8", color = "grey40", linewidth = 0.4) +
+  geom_sf(data = conflict, color = "#e8000d", size = 0.6, alpha = 0.7) +
+  geom_point(data = legend_data1, aes(x = x, y = y, color = type), size = 0, alpha = 0) +
+  geom_sf_text(data = countries, aes(label = ADMIN), size = 2.5, color = "grey30", fontface = "italic") +
+  scale_color_manual(
+    name   = NULL,
+    values = c("Conflict Events" = "#e8000d"),
+    guide  = guide_legend(override.aes = list(size = 3, alpha = 1))
+  ) +
+  coord_sf(xlim = c(34, 62), ylim = c(12, 42), expand = FALSE) +
+  labs(
+    title    = "Armed Conflict Events in the Middle East",
+    subtitle = "Based on ACLED data across eight study countries",
+    caption  = "Source: Armed Conflict Location & Event Data (ACLED)"
+  ) +
+  theme_void() +
+  theme(
+    plot.title      = element_text(size = 14, face = "bold", hjust = 0.5),
+    plot.subtitle   = element_text(size = 10, color = "grey40", hjust = 0.5),
+    plot.caption    = element_text(size = 8,  color = "grey50", hjust = 0.5),
+    plot.margin     = margin(10, 10, 10, 10),
+    legend.position = "left",
+    legend.text     = element_text(size = 8)
+  )
+```
+
+
+
+```{r map2}
+gem_clipped <- st_intersection(gem, st_union(countries))
+
+legend_data2 <- data.frame(
+  x = c(0, 0),
+  y = c(0, 0),
+  type = c("Extraction Sites", "Pipelines (——)")
+)
+
+ggplot() +
+  geom_sf(data = countries, fill = "#f5f0e8", color = "grey40", linewidth = 0.4) +
+  geom_sf(data = gem_clipped, color = "#1a6b9e", linewidth = 0.5, alpha = 0.5) +
+  geom_sf(data = gogpt, color = "#0a3d62", size = 0.6, alpha = 0.8) +
+  geom_point(data = legend_data2, aes(x = x, y = y, color = type), size = 0, alpha = 0) +
+  geom_sf_text(data = countries, aes(label = ADMIN), size = 2.5, color = "grey30", fontface = "italic") +
+  scale_color_manual(
+    name   = NULL,
+    values = c("Extraction Sites" = "#0a3d62", "Pipelines (——)" = "#1a6b9e"),
+    guide  = guide_legend(override.aes = list(size = 3, alpha = 1))
+  ) +
+  coord_sf(xlim = c(34, 62), ylim = c(12, 42), expand = FALSE) +
+  labs(
+    title    = "Oil Infrastructure in the Middle East",
+    subtitle = "Pipelines and extraction sites across eight study countries",
+    caption  = "Sources: Global Energy Monitor (GEM), Global Oil & Gas Production Tracker"
+  ) +
+  theme_void() +
+  theme(
+    plot.title      = element_text(size = 14, face = "bold", hjust = 0.5),
+    plot.subtitle   = element_text(size = 10, color = "grey40", hjust = 0.5),
+    plot.caption    = element_text(size = 8,  color = "grey50", hjust = 0.5),
+    plot.margin     = margin(10, 10, 10, 10),
+    legend.position = "left",
+    legend.text     = element_text(size = 8)
+  )
+```
+
+
+
+```{r map3}
+legend_data3 <- data.frame(
+  x = c(0, 0, 0),
+  y = c(0, 0, 0),
+  type = c("Conflict Events", "Extraction Sites", "Pipelines (——)")
+)
+
+ggplot() +
+  geom_sf(data = countries, fill = "#f5f0e8", color = "grey40", linewidth = 0.4) +
+  geom_sf(data = gem_clipped, color = "#1a6b9e", linewidth = 0.5, alpha = 0.5) +
+  geom_sf(data = gogpt, color = "#0a3d62", size = 0.6, alpha = 0.8) +
+  geom_sf(data = conflict, color = "#e8000d", size = 0.6, alpha = 0.5) +
+  geom_point(data = legend_data3, aes(x = x, y = y, color = type), size = 0, alpha = 0) +
+  geom_sf_text(data = countries, aes(label = ADMIN), size = 2.5, color = "grey30", fontface = "italic") +
+  scale_color_manual(
+    name   = NULL,
+    values = c("Conflict Events" = "#e8000d", "Extraction Sites" = "#0a3d62", "Pipelines (——)" = "#1a6b9e"),
+    guide  = guide_legend(override.aes = list(size = 3, alpha = 1))
+  ) +
+  coord_sf(xlim = c(34, 62), ylim = c(12, 42), expand = FALSE) +
+  labs(
+    title    = "Armed Conflict and Oil Infrastructure in the Middle East",
+    subtitle = "Conflict events (red), extraction sites and pipelines (blue)",
+    caption  = "Sources: ACLED, Global Energy Monitor (GEM), Global Oil & Gas Production Tracker"
+  ) +
+  theme_void() +
+  theme(
+    plot.title      = element_text(size = 14, face = "bold", hjust = 0.5),
+    plot.subtitle   = element_text(size = 10, color = "grey40", hjust = 0.5),
+    plot.caption    = element_text(size = 8,  color = "grey50", hjust = 0.5),
+    plot.margin     = margin(10, 10, 10, 10),
+    legend.position = "left",
+    legend.text     = element_text(size = 8)
+  )
+```
+

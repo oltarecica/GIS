@@ -1,0 +1,187 @@
+---
+title: "Methodology: Spatial Relationship Between Oil Infrastructure and Conflict in the Middle East"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+# Introduction
+
+This project examines how proximity to oil infrastructure shapes the spatial distribution of armed conflict events in the Middle East. The analysis focuses on eight countries: Saudi Arabia, Iraq, Iran, Kuwait, United Arab Emirates, Qatar, Syria, and Yemen.
+
+We use geospatial methods to:
+- identify cities near oil infrastructure
+- measure their proximity to conflict events
+- compare patterns across different buffer distances
+
+---
+
+# Setup
+
+```{r setup, message=FALSE, warning=FALSE}
+library(sf)
+library(dplyr)
+library(stringr)
+library(rnaturalearth)  
+
+# Load data
+gogpt_3857 <- readRDS("data/clean/gogpt_3857.rds")
+acled <- readRDS("data/clean/acled_clean.rds")
+conflict_sf <- acled$crs_3857
+
+```
+
+# Basemap
+
+```{r basemap}
+world <- ne_countries(scale = 50, returnclass = "sf")
+
+countries <- c(
+  "Saudi Arabia", "Iraq", "Iran",
+  "Kuwait", "United Arab Emirates",
+  "Qatar", "Syria", "Yemen"
+)
+
+world_subset <- world %>%
+  filter(admin %in% countries)
+
+world_subset <- st_transform(world_subset, 3857)
+```
+
+# Data preparation
+
+## Oil infraestructure
+
+```{r oil infraestructure}
+oil_sf <- gogpt_3857 %>%
+  filter(str_detect(Fuel, "oil"))
+
+nrow(oil_sf)
+unique(oil_sf$Country)
+
+plot(st_geometry(world_subset), col = "grey90", border = "black")
+plot(st_geometry(oil_sf), add = TRUE, col = "red", pch = 16)
+```
+
+# Conflict data
+
+```{r conflict}
+conflict_sf <- acled$crs_3857
+
+### Filter time period ###
+conflict_sf <- conflict_sf %>%
+  filter(WEEK >= as.Date("2010-01-01"))
+
+st_crs(conflict_sf)
+unique(conflict_sf$COUNTRY)
+nrow(conflict_sf)
+
+plot(st_geometry(world_subset), col = "grey90", border = "black")
+plot(st_geometry(conflict_sf), add = TRUE, pch = 16, cex = 0.5)
+```
+
+## Cities data
+
+```{r cities}
+cities_sf <- ne_download(
+  scale = 10,
+  type = "populated_places",
+  returnclass = "sf"
+)
+
+cities_sf <- cities_sf %>%
+  filter(ADM0NAME %in% countries)
+
+cities_sf <- st_transform(cities_sf, 3857)
+
+nrow(cities_sf)
+
+plot(st_geometry(world_subset), col = "grey90", border = "black")
+plot(st_geometry(cities_sf), add = TRUE, pch = 16, col = "blue")
+```
+
+# Methodology 
+
+## Buffer creation and city tagging 
+
+```{r buffer creation and city tagging}
+oil_buffer_25 <- st_buffer(oil_sf, dist = 25000)
+oil_buffer_50 <- st_buffer(oil_sf, dist = 50000)
+
+cities_sf$near_oil_25km <- lengths(
+  st_intersects(cities_sf, oil_buffer_25)
+) > 0
+
+cities_sf$near_oil_50km <- lengths(
+  st_intersects(cities_sf, oil_buffer_50)
+) > 0
+
+table(cities_sf$near_oil_25km)
+table(cities_sf$near_oil_50km)
+```
+
+## Visual check 
+
+```{r visual check}
+plot(st_geometry(world_subset), col = "grey90", border = "black")
+plot(st_geometry(oil_buffer_25), col = adjustcolor("lightblue", alpha.f = 0.4), add = TRUE)
+plot(st_geometry(cities_sf), add = TRUE, pch = 16)
+
+plot(st_geometry(world_subset), col = "grey90", border = "black")
+plot(st_geometry(oil_buffer_50), col = adjustcolor("lightgreen", alpha.f = 0.4), add = TRUE)
+plot(st_geometry(cities_sf), add = TRUE, pch = 16)
+```
+
+## Conflict events within buffers
+
+```{r conflict events within buffers}
+conflict_in_25 <- lengths(
+  st_intersects(conflict_sf, oil_buffer_25)
+) > 0
+
+conflict_in_50 <- lengths(
+  st_intersects(conflict_sf, oil_buffer_50)
+) > 0
+
+table(conflict_in_25)
+table(conflict_in_50)
+```
+
+## Distance to nearest conflict
+
+```{r distance to nearest conflict}
+nearest_index <- st_nearest_feature(cities_sf, conflict_sf)
+
+nearest_dist <- st_distance(
+  cities_sf,
+  conflict_sf[nearest_index, ],
+  by_element = TRUE
+)
+
+cities_sf$dist_to_conflict_km <- as.numeric(nearest_dist) / 1000
+
+summary(cities_sf$dist_to_conflict_km)
+```
+
+# Results
+
+## Mean distance to conflict (25 km)
+
+```{r mean distance to conflict (25 km)}
+cities_sf %>%
+  st_drop_geometry() %>%
+  group_by(near_oil_25km) %>%
+  summarise(mean_distance = mean(dist_to_conflict_km, na.rm = TRUE))
+```
+
+Cities located near oil infrastructure exhibit lower average distances to conflict events compared to those located farther away.
+
+## Mean distance to conflict (50 km)
+
+```{r mean distance to conflict (50 km)}
+cities_sf %>%
+  st_drop_geometry() %>%
+  group_by(near_oil_50km) %>%
+  summarise(mean_distance = mean(dist_to_conflict_km, na.rm = TRUE))
+```
+
+The difference becomes more pronounced when using a larger buffer, suggesting that the spatial influence of oil infrastructure extends beyond immediate proximity.

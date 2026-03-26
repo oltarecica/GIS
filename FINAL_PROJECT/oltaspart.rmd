@@ -1,0 +1,376 @@
+---
+title: "Task 4s"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+## Setup
+
+We load two packages. `sf` handles all spatial operations. `tidyverse` covers data wrangling and plotting.
+
+```{r libraries}
+library(sf)
+library(tidyverse)
+```
+
+---
+
+## Data preparation
+
+We load the tagged city and conflict datasets saved by the buffering and tagging step. These files already contain the oil proximity flags and the distance-to-conflict column, so we can jump straight to analysis.
+
+```{r load_data}
+# cities_tagged.rds contains one row per city with:
+#   near_oil_30km / near_oil_60km  (TRUE/FALSE oil proximity tags)
+#   dist_to_conflict_km            (distance to the nearest conflict event)
+cities_sf   <- readRDS("data/clean/cities_tagged.rds")
+
+# conflict_tagged.rds contains one row per conflict event with:
+#   dist_to_oil_km  (distance to the nearest oil plant)
+#   in_buffer_30 / in_buffer_60  (TRUE/FALSE, inside each buffer zone)
+conflict_sf <- readRDS("data/clean/conflict_tagged.rds")
+
+# We still need the oil plant layer to rebuild the buffer polygons for the
+# hidden distance/share calculations below
+oil_sf <- readRDS("data/clean/gogpt_3857.rds") %>%
+  filter(str_detect(Fuel, regex("oil", ignore_case = TRUE)))
+
+oil_buffer_30 <- st_buffer(oil_sf, dist = 30000)
+oil_buffer_60 <- st_buffer(oil_sf, dist = 60000)
+
+cat("Cities loaded:", nrow(cities_sf), "\n")
+cat("Near oil (30 km):", sum(cities_sf$near_oil_30km), "\n")
+cat("Near oil (60 km):", sum(cities_sf$near_oil_60km), "\n")
+cat("Conflict events loaded:", nrow(conflict_sf), "\n")
+```
+
+---
+
+## Results table
+
+We now collapse the city-level data into a summary table. For each country, we split cities into their two groups and compute the average and median distance to conflict. This is our main results table with one row per country per group.
+
+```{r results_table}
+# st_drop_geometry removes the spatial column so we can work with a plain data frame.
+# We no longer need the coordinates at this point, just the attributes
+results_table <- cities_sf %>%
+  st_drop_geometry() %>%
+  # Convert the TRUE/FALSE oil tag into human-readable labels for the table
+  mutate(oil_tag = if_else(near_oil_30km, "Near oil", "Not near oil")) %>%
+  # Group by both country and oil tag. This gives us one row per combination
+  group_by(Country = ADM0NAME, oil_tag) %>%
+  summarise(
+    n_cities       = n(),
+    avg_dist_km    = round(mean(dist_to_conflict_km, na.rm = TRUE), 1),   # our headline number
+    median_dist_km = round(median(dist_to_conflict_km, na.rm = TRUE), 1), # less sensitive to extreme values
+    .groups = "drop"
+  ) %>%
+  arrange(Country, oil_tag)
+
+knitr::kable(
+  results_table,
+  col.names = c("Country", "Oil Tag", "N Cities", "Avg Dist (km)", "Median Dist (km)"),
+  caption   = "Average distance to nearest conflict event by country and oil proximity tag (30 km buffer)"
+)
+```
+
+Several countries (Kuwait, Qatar) only have cities in the "Near oil" group, meaning all their cities fall within 30 km of an oil plant. This limits within-country comparison for those cases.
+
+---
+
+## Figure 1: Bar chart
+
+This chart makes the country-level comparison visual. Each pair of bars shows the average conflict distance for oil vs. non-oil cities in one country. A shorter red bar means oil cities are closer to conflict in that country, which is consistent with the hypothesis.
+
+```{r bar_chart, fig.width=9, fig.height=5}
+# reorder(Country, avg_dist_km) sorts countries by distance so the chart reads
+# from the lowest average distance on the left to the highest on the right
+# position_dodge() places the two bars side by side instead of stacking them
+ggplot(results_table, aes(x = reorder(Country, avg_dist_km), y = avg_dist_km,
+                           fill = oil_tag)) +
+  geom_col(position = position_dodge(width = 0.75), width = 0.65) +
+  # Add the exact km value as a label floating just above each bar
+  geom_text(
+    aes(label = paste0(avg_dist_km, " km")),
+    position = position_dodge(width = 0.75),
+    vjust = -0.4, size = 3
+  ) +
+  scale_fill_manual(
+    values = c("Near oil" = "#D85A30", "Not near oil" = "#378ADD"),
+    name   = "Oil proximity\n(30 km buffer)"
+  ) +
+  labs(
+    title    = "Average Distance to Nearest Conflict Event",
+    subtitle = "Oil vs. non-oil cities by country",
+    x        = NULL,
+    y        = "Average distance (km)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.x     = element_text(angle = 30, hjust = 1),
+    plot.title      = element_text(face = "bold"),
+    legend.position = "top"
+  )
+```
+
+---
+
+## Figure 2: Distribution plot
+
+Averages can hide a lot. This histogram shows the full distribution of individual city distances for each group, broken out by country. It lets us see whether the two groups truly separate or whether they overlap heavily.
+
+```{r distribution_plot, fig.width=9, fig.height=5}
+# Prepare a plain data frame with readable oil tag labels for plotting
+cities_plot <- cities_sf %>%
+  st_drop_geometry() %>%
+  mutate(oil_tag = if_else(near_oil_30km, "Near oil", "Not near oil"))
+
+# facet_wrap splits the plot into one panel per country so we can see
+# country-level patterns that would be hidden in a single pooled histogram
+# scales = "free_y" gives each panel its own y-axis since city counts vary a lot by country
+# alpha = 0.7 makes bars semi-transparent so both groups are visible where they overlap
+ggplot(cities_plot, aes(x = dist_to_conflict_km, fill = oil_tag)) +
+  geom_histogram(bins = 30, alpha = 0.7, position = "identity", color = "white") +
+  scale_fill_manual(
+    values = c("Near oil" = "#D85A30", "Not near oil" = "#378ADD"),
+    name   = "Oil proximity\n(30 km buffer)"
+  ) +
+  facet_wrap(~ ADM0NAME, scales = "free_y") +
+  labs(
+    title    = "Distribution of City Distances to Nearest Conflict Event",
+    subtitle = "Each panel = one country; 30 km buffer tag",
+    x        = "Distance to nearest conflict event (km)",
+    y        = "Number of cities"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    plot.title      = element_text(face = "bold"),
+    legend.position = "top",
+    strip.text      = element_text(face = "bold")
+  )
+```
+
+---
+
+## T-test
+
+The bar chart shows that oil cities are slightly closer to conflict on average overall. But we still don't know if that difference real, or if it could just be random variation in a small sample. A two-sample t-test compares the means of two groups and tells us the probability of seeing a difference this large if there were actually no true difference. If that probability (the p-value) is below 0.05, we call the result statistically significant. We run the test for both buffer distances.
+
+### 30 km buffer
+
+```{r ttest_30}
+# Drop geometry first. T.test works on plain numeric vectors, not spatial objects
+cities_ttest <- cities_sf %>% st_drop_geometry()
+
+# The formula dist_to_conflict_km ~ near_oil_30km tells R to compare the distribution
+# of distances across the two groups defined by the near_oil_30km TRUE/FALSE column
+# Welch's t-test (the R default) is used because it does not assume the two groups
+# have equal variance, which is the safer choice here given the different group sizes
+t_result_30 <- t.test(
+  dist_to_conflict_km ~ near_oil_30km,
+  data = cities_ttest
+)
+
+t_result_30
+```
+
+```{r ttest_table_30, echo=FALSE}
+knitr::kable(
+  data.frame(
+    Group        = c("Not near oil (FALSE)", "Near oil (TRUE)"),
+    Mean_dist_km = round(t_result_30$estimate, 1),
+    row.names    = NULL
+  ),
+  col.names = c("Group", "Mean distance to conflict (km)"),
+  caption   = "Group means from Welch two-sample t-test (30 km buffer)"
+)
+
+cat("t =", round(t_result_30$statistic, 3),
+    "| df =", round(t_result_30$parameter, 1),
+    "| p-value =", round(t_result_30$p.value, 4), "\n")
+cat("Near oil (30 km):", sum(cities_ttest$near_oil_30km),
+    "| Not near oil:", sum(!cities_ttest$near_oil_30km), "\n")
+```
+
+### 60 km buffer
+
+The gap between oil and non-oil cities grows from ~8 km at 30 km to ~23 km at 60 km. A larger buffer pulls more cities into the near-oil group, which also gives the test more statistical power to detect a difference.
+
+```{r ttest_60}
+# Same test structure as above but now splitting cities by the 60 km buffer tag
+# The near-oil group will be larger here, which gives the test more power
+# to detect a difference if one truly exists
+t_result_60 <- t.test(
+  dist_to_conflict_km ~ near_oil_60km,
+  data = cities_ttest
+)
+
+t_result_60
+```
+
+```{r ttest_table_60, echo=FALSE}
+knitr::kable(
+  data.frame(
+    Group        = c("Not near oil (FALSE)", "Near oil (TRUE)"),
+    Mean_dist_km = round(t_result_60$estimate, 1),
+    row.names    = NULL
+  ),
+  col.names = c("Group", "Mean distance to conflict (km)"),
+  caption   = "Group means from Welch two-sample t-test (60 km buffer)"
+)
+
+cat("t =", round(t_result_60$statistic, 3),
+    "| df =", round(t_result_60$parameter, 1),
+    "| p-value =", round(t_result_60$p.value, 4), "\n")
+cat("Near oil (60 km):", sum(cities_ttest$near_oil_60km),
+    "| Not near oil:", sum(!cities_ttest$near_oil_60km), "\n")
+```
+
+### Summary across buffer sizes
+
+```{r buffer_sensitivity, echo=FALSE}
+# Collect both results into one table to see how the test changes with buffer size
+sensitivity_tbl <- data.frame(
+  Buffer     = c("30 km", "60 km"),
+  Near_oil_n = c(sum(cities_ttest$near_oil_30km),
+                 sum(cities_ttest$near_oil_60km)),
+  t_stat     = round(c(t_result_30$statistic,
+                        t_result_60$statistic), 3),
+  p_value    = round(c(t_result_30$p.value,
+                        t_result_60$p.value), 4)
+)
+
+knitr::kable(
+  sensitivity_tbl,
+  col.names = c("Buffer", "N cities near oil", "t statistic", "p-value"),
+  caption   = "Buffer sensitivity: how the t-test result changes as the buffer grows"
+)
+```
+
+---
+
+## Conflict proximity to oil infrastructure: Country breakdown
+
+We extend the conflict-to-oil distance analysis to the country level, showing where the average distance is shortest and therefore where conflict is most concentrated around oil sites.
+
+```{r conflict_to_oil_summary}
+# Summarise conflict-to-oil distances by country
+conflict_oil_summary <- conflict_sf %>%
+  st_drop_geometry() %>%
+  group_by(Country = COUNTRY) %>%
+  summarise(
+    n_events       = n(),
+    avg_dist_km    = round(mean(dist_to_oil_km, na.rm = TRUE), 1),
+    median_dist_km = round(median(dist_to_oil_km, na.rm = TRUE), 1),
+    .groups = "drop"
+  ) %>%
+  arrange(avg_dist_km)
+
+knitr::kable(
+  conflict_oil_summary,
+  col.names = c("Country", "N Conflict Events", "Avg Dist to Oil (km)", "Median Dist to Oil (km)"),
+  caption   = "Average distance from conflict events to nearest oil plant, by country"
+)
+```
+
+```{r conflict_to_oil_plot, fig.width=9, fig.height=4}
+ggplot(conflict_oil_summary,
+       aes(x = reorder(Country, avg_dist_km), y = avg_dist_km)) +
+  geom_col(fill = "#D85A30", width = 0.65) +
+  geom_text(aes(label = paste0(avg_dist_km, " km")), vjust = -0.4, size = 3) +
+  labs(
+    title    = "Average Distance from Conflict Events to Nearest Oil Plant",
+    subtitle = "Lower = conflict tends to happen closer to oil infrastructure",
+    x        = NULL,
+    y        = "Average distance (km)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.x  = element_text(angle = 30, hjust = 1),
+    plot.title   = element_text(face = "bold")
+  )
+```
+
+---
+
+## Share of conflict events inside oil buffer zones: Country breakdown
+
+We break down the buffer share analysis by country to show where the concentration of conflict near oil is strongest.
+
+```{r conflict_buffer_by_country}
+# Break down by country to see where the concentration is strongest
+buffer_country <- conflict_sf %>%
+  st_drop_geometry() %>%
+  group_by(Country = COUNTRY) %>%
+  summarise(
+    n_events    = n(),
+    pct_in_30km = round(100 * mean(in_buffer_30), 1),
+    pct_in_60km = round(100 * mean(in_buffer_60), 1),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(pct_in_30km))
+
+knitr::kable(
+  buffer_country,
+  col.names = c("Country", "N Events", "% Inside 30 km Buffer", "% Inside 60 km Buffer"),
+  caption   = "Share of conflict events falling inside oil plant buffer zones, by country"
+)
+```
+
+```{r conflict_buffer_plot, fig.width=9, fig.height=5}
+# Reshape to long format so we can plot both buffers as side-by-side bars
+buffer_long <- buffer_country %>%
+  pivot_longer(cols = c(pct_in_30km, pct_in_60km),
+               names_to  = "buffer",
+               values_to = "pct") %>%
+  mutate(buffer = if_else(buffer == "pct_in_30km", "30 km buffer", "60 km buffer"))
+
+ggplot(buffer_long, aes(x = reorder(Country, pct), y = pct, fill = buffer)) +
+  geom_col(position = position_dodge(width = 0.75), width = 0.65) +
+  geom_text(
+    aes(label = paste0(pct, "%")),
+    position = position_dodge(width = 0.75),
+    vjust = -0.4, size = 3
+  ) +
+  scale_fill_manual(
+    values = c("30 km buffer" = "#D85A30", "60 km buffer" = "#378ADD"),
+    name   = NULL
+  ) +
+  labs(
+    title    = "Share of Conflict Events Inside Oil Buffer Zones",
+    subtitle = "By country",
+    x        = NULL,
+    y        = "% of conflict events"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.x     = element_text(angle = 30, hjust = 1),
+    plot.title      = element_text(face = "bold"),
+    legend.position = "top"
+  )
+```
+
+---
+
+## Interpretation
+
+```{r interpretation_numbers, echo=FALSE}
+# Compute the within-country difference for each country
+# A positive value means oil cities are closer to conflict, which supports the hypothesis
+diff_tbl <- results_table %>%
+  select(Country, oil_tag, avg_dist_km) %>%
+  pivot_wider(names_from = oil_tag, values_from = avg_dist_km) %>%
+  mutate(difference_km = round(`Not near oil` - `Near oil`, 1)) %>%
+  filter(!is.na(difference_km))
+
+countries_closer <- sum(diff_tbl$difference_km > 0, na.rm = TRUE)
+countries_total  <- nrow(diff_tbl)
+```
+
+The three analyses together provide consistent and, at the 60 km scale, statistically significant evidence that conflict clusters near oil infrastructure in the Middle East. At the city level, oil-proximate cities are closer to conflict in `r countries_closer` out of `r countries_total` countries where both groups exist. The 30 km buffer shows a modest gap (oil cities: 75.6 km vs. non-oil: 83.6 km) that is not statistically significant (t = 0.73, p = 0.469). At 60 km, however, the difference grows to approximately 23 km (oil cities: 69.6 km vs. non-oil: 92.7 km) and is statistically significant (t = 2.26, p = 0.025). This is our headline result: cities within 60 km of oil infrastructure are significantly closer to conflict than those farther away.
+
+The conflict-to-oil distance analysis adds a complementary perspective. Conflict events across the region are on average within approximately 88 km of their nearest oil plant, with a median of 81 km. The buffer share analysis confirms this directly: 25% of all conflict events fall within 30 km of an oil plant, and 40% within 60 km. This is a substantial concentration given that oil plants occupy only a small fraction of the total land area. Together, the findings suggest that the spatial relationship between oil infrastructure and conflict operates at a broader geographic scale than the immediate plant vicinity. The 60 km buffer is the threshold at which the signal becomes statistically detectable with this dataset. The effect is strongest in countries like Iraq, where oil zones and conflict zones genuinely overlap, and is weaker in Yemen and Saudi Arabia, where conflict is either geographically pervasive or structurally separated from oil-producing regions.

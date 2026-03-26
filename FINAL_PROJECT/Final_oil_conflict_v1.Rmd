@@ -10,19 +10,11 @@ geometry: margin=1in
 header-includes:
   - \usepackage{setspace}
   - \onehalfspacing
-  - \usepackage{tocloft}
-  - \usepackage{titlesec}
-  - \usepackage{lmodern}
   - \usepackage[T1]{fontenc}
   - \usepackage{mathptmx}
   - \usepackage{fancyhdr}
   - \setcounter{secnumdepth}{3}
   - \setcounter{tocdepth}{2}
-  - \renewcommand{\cftsecleader}{\cftdotfill{\cftdotsep}}
-  - \titleformat{\section}{\normalfont\large\bfseries}{\thesection}{1em}{}
-  - \titleformat{\subsection}{\normalfont\normalsize\bfseries}{\thesubsection}{1em}{}
-  - \titlespacing*{\section}{0pt}{12pt}{6pt}
-  - \titlespacing*{\subsection}{0pt}{10pt}{4pt}
   - |
     \pagestyle{fancy}
     \fancyhf{}
@@ -31,7 +23,6 @@ header-includes:
     \renewcommand{\headrulewidth}{0.4pt}
     \renewcommand{\footrulewidth}{0pt}
 ---
-
 \begin{titlepage}
 \centering
 
@@ -88,11 +79,16 @@ To address this gap, this project adopts a multi-method geospatial approach, all
 
 ## Data
 
-**Detail your datasets and describe final data.**
+The analysis focuses on eight countries in the Middle East: Saudi Arabia, Iraq, Iran, Kuwait, United Arab Emirates, Qatar, Syria, and Yemen. To examine the spatial relationship between oil infrastructure and conflict, the project combines georeferenced data on conflict events, fixed oil and gas infrastructure, populated places, and country boundaries.
 
-The study focuses on eight Middle Eastern countries and uses geospatial datasets on oil infrastructure, populated places (cities), and conflict events.
+**Conflict data come from the Armed Conflict Location & Event Data Project (ACLED)**, using an aggregated weekly dataset for the Middle East. From the raw file, the sample is restricted to the eight study countries. Observations with missing geographic coordinates are removed, and the date variable is standardized. The remaining records are converted into a spatial dataset using the reported longitude and latitude coordinates. Because the source is aggregated at the weekly level, each observation represents a conflict record associated with a specific location and week.
 
-All spatial data are projected to a common coordinate reference system (EPSG:3857) to ensure accurate distance calculations. Conflict data are restricted to events occurring from 2010 onwards to maintain temporal consistency.
+**Oil infrastructure is measured using the Global Oil and Gas Plant Tracker (GOGPT)**. This dataset provides point locations for oil and gas plants and units, together with information such as plant name, operational status, fuel classification, ownership, and capacity. The data are filtered to the study countries, and only observations with valid latitude and longitude are retained. These plant locations constitute the main infrastructure layer used in the empirical analysis.
+
+To represent populated locations, the study uses Natural Earth populated places data. These data provide city point locations and are filtered to the same eight countries. They are used in the city-level analysis, where each city is linked to the nearest conflict event and classified according to its proximity to oil infrastructure.
+Country boundaries are taken from Natural Earth administrative polygons. These boundaries are used to define the study area and to provide geographic context for the maps.
+
+All spatial datasets are stored in two coordinate reference systems. Data in EPSG:4326 are used for mapping and visualization, while data in EPSG:3857 are used for buffer construction and distance calculations. This ensures consistency between cartographic presentation and spatial measurement.
 
 ## Methodology
 

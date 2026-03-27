@@ -233,5 +233,16 @@ prop.table(table(conflict_in_60))
 ```
 A notable share of conflict events occurs in proximity to oil infrastructure. Approximately 25% of events are located within 30 km of oil sites, increasing to nearly 40% within 60 km. This pattern indicates that a substantial proportion of conflict takes place within areas that are geographically close to oil infrastructure, particularly when considering broader distance thresholds.
 
+---
+
+# Save outputs
+
+```{r save}
+# Save the tagged cities and conflict datasets so downstream analyses
+# can load them directly without rebuilding the pipeline
+saveRDS(cities_sf,   "data/clean/cities_tagged.rds")
+saveRDS(conflict_sf, "data/clean/conflict_tagged.rds")
+```
+
 
 

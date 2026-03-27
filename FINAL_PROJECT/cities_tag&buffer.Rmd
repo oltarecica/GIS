@@ -22,65 +22,66 @@ library(sf)
 library(dplyr)
 library(stringr)
 library(rnaturalearth)  
+library(ggplot2)
 
 # Load data
 gogpt_3857 <- readRDS("data/clean/gogpt_3857.rds")
 acled <- readRDS("data/clean/acled_clean.rds")
-conflict_sf <- acled$crs_3857
+countries <- readRDS("data/clean/countries_clean.rds")
 
 ```
 
 # Basemap
 
 ```{r basemap}
-world <- ne_countries(scale = 50, returnclass = "sf")
+countries_sf <- countries$crs_3857
 
-countries <- c(
+country_names <- c(
   "Saudi Arabia", "Iraq", "Iran",
   "Kuwait", "United Arab Emirates",
   "Qatar", "Syria", "Yemen"
 )
-
-world_subset <- world %>%
-  filter(admin %in% countries)
-
-world_subset <- st_transform(world_subset, 3857)
 ```
 
 # Data preparation
 
 ## Oil infraestructure
 
-```{r oil infraestructure}
+```{r oil infrastructure}
 oil_sf <- gogpt_3857 %>%
-  filter(str_detect(Fuel, "oil"))
+  filter(str_detect(tolower(Fuel), "oil")) %>%
+  st_make_valid()
+
+oil_sf <- st_intersection(oil_sf, st_union(countries_sf))
 
 nrow(oil_sf)
 unique(oil_sf$Country)
 
-plot(st_geometry(world_subset), col = "grey90", border = "black")
+plot(st_geometry(countries_sf), col = "grey90", border = "black")
 plot(st_geometry(oil_sf), add = TRUE, col = "red", pch = 16)
 ```
 
 # Conflict data
 
 ```{r conflict}
+# Conflict data
 conflict_sf <- acled$crs_3857
 
 ### Filter time period ###
 conflict_sf <- conflict_sf %>%
-  filter(WEEK >= as.Date("2010-01-01"))
-
+  filter(WEEK >= as.Date("2010-01-01")) %>%
+  st_make_valid()
+  
 st_crs(conflict_sf)
 unique(conflict_sf$COUNTRY)
 nrow(conflict_sf)
 
-plot(st_geometry(world_subset), col = "grey90", border = "black")
+plot(st_geometry(countries_sf), col = "grey90", border = "black")
 plot(st_geometry(conflict_sf), add = TRUE, pch = 16, cex = 0.5)
+
 ```
 
 ## Cities data
-
 ```{r cities}
 cities_sf <- ne_download(
   scale = 10,
@@ -89,13 +90,14 @@ cities_sf <- ne_download(
 )
 
 cities_sf <- cities_sf %>%
-  filter(ADM0NAME %in% countries)
-
+  filter(ADM0NAME %in% country_names) %>%
+  st_make_valid()
+  
 cities_sf <- st_transform(cities_sf, 3857)
 
 nrow(cities_sf)
 
-plot(st_geometry(world_subset), col = "grey90", border = "black")
+plot(st_geometry(countries_sf), col = "grey90", border = "black")
 plot(st_geometry(cities_sf), add = TRUE, pch = 16, col = "blue")
 ```
 
@@ -104,8 +106,10 @@ plot(st_geometry(cities_sf), add = TRUE, pch = 16, col = "blue")
 ## Buffer creation and city tagging 
 
 ```{r buffer creation and city tagging}
-oil_buffer_30 <- st_buffer(oil_sf, dist = 30000)
-oil_buffer_60 <- st_buffer(oil_sf, dist = 60000)
+oil_union <- st_union(oil_sf)
+
+oil_buffer_30 <- st_buffer(oil_union, dist = 30000)
+oil_buffer_60 <- st_buffer(oil_union, dist = 60000)
 
 cities_sf$near_oil_30km <- lengths(
   st_intersects(cities_sf, oil_buffer_30)
@@ -122,11 +126,11 @@ table(cities_sf$near_oil_60km)
 ## Visual check 
 
 ```{r visual check}
-plot(st_geometry(world_subset), col = "grey90", border = "black")
+plot(st_geometry(countries_sf), col = "grey90", border = "black")
 plot(st_geometry(oil_buffer_30), col = adjustcolor("lightblue", alpha.f = 0.4), add = TRUE)
 plot(st_geometry(cities_sf), add = TRUE, pch = 16)
 
-plot(st_geometry(world_subset), col = "grey90", border = "black")
+plot(st_geometry(countries_sf), col = "grey90", border = "black")
 plot(st_geometry(oil_buffer_60), col = adjustcolor("lightgreen", alpha.f = 0.4), add = TRUE)
 plot(st_geometry(cities_sf), add = TRUE, pch = 16)
 ```
@@ -233,5 +237,191 @@ prop.table(table(conflict_in_60))
 ```
 A notable share of conflict events occurs in proximity to oil infrastructure. Approximately 25% of events are located within 30 km of oil sites, increasing to nearly 40% within 60 km. This pattern indicates that a substantial proportion of conflict takes place within areas that are geographically close to oil infrastructure, particularly when considering broader distance thresholds.
 
+# Maps
+```{r}
+countries_map <- countries$crs_4326
 
+conflict_map <- acled$crs_4326 %>%
+  filter(WEEK >= as.Date("2010-01-01"))
+
+oil_map <- st_transform(oil_sf, 4326)
+cities_map <- st_transform(cities_sf, 4326)
+
+oil_buffer_30_map <- st_transform(oil_buffer_30, 4326)
+oil_buffer_60_map <- st_transform(oil_buffer_60, 4326)
+```
+
+## Map 1: 30 km buffer
+
+```{r map_30km, fig.width=8, fig.height=6}
+legend_data_30 <- data.frame(
+  x = c(0, 0),
+  y = c(0, 0),
+  type = c("Near Oil (30km)", "Far from Oil")
+)
+
+ggplot() +
+  geom_sf(data = countries_map, fill = "#f5f0e8", color = "grey40", linewidth = 0.4) +
+  
+  geom_sf(data = oil_buffer_30_map, fill = "#EE7600", alpha = 0.3, color = NA) +
+  
+  geom_sf(data = cities_map,
+          aes(color = ifelse(near_oil_30km, "Near Oil", "Far from Oil")),
+          size = 1) +
+  
+  geom_point(data = legend_data_30,
+             aes(x = x, y = y, color = type),
+             size = 0, alpha = 0) +
+  
+  geom_sf_text(data = countries_map, aes(label = ADMIN),
+               size = 2.5, color = "grey30", fontface = "italic") +
+  
+  scale_color_manual(
+    name = NULL,
+    values = c(
+      "Near Oil" = "#d73027",
+      "Far from Oil" = "#4575b4"
+    ),
+    guide = guide_legend(override.aes = list(size = 3, alpha = 1))
+  ) +
+  
+  coord_sf(xlim = c(34, 62), ylim = c(12, 42), expand = FALSE) +
+  
+  labs(
+    title = "Cities and Oil Infrastructure (30 km Buffer)",
+    subtitle = "Cities classified by proximity to oil infrastructure",
+    caption = "Sources: GOGPT, Natural Earth"
+  ) +
+  
+  theme_void() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 10, color = "grey40", hjust = 0.5),
+    plot.caption = element_text(size = 8, color = "grey50", hjust = 0.5),
+    legend.position = "left"
+  )
+```
+
+
+## Map 2: 60 km buffer
+
+```{r map_60km, fig.width=8, fig.height=6}
+legend_data_60 <- data.frame(
+  x = c(0, 0),
+  y = c(0, 0),
+  type = c("Near Oil (60km)", "Far from Oil")
+)
+
+ggplot() +
+  geom_sf(data = countries_map, fill = "#f5f0e8", color = "grey40", linewidth = 0.4) +
+  
+  geom_sf(data = oil_buffer_60_map, fill = "#66bd63", alpha = 0.3, color = NA) +
+  
+  geom_sf(data = cities_map,
+          aes(color = ifelse(near_oil_60km, "Near Oil", "Far from Oil")),
+          size = 1) +
+  
+  geom_point(data = legend_data_60,
+             aes(x = x, y = y, color = type),
+             size = 0, alpha = 0) +
+  
+  geom_sf_text(data = countries_map, aes(label = ADMIN),
+               size = 2.5, color = "grey30", fontface = "italic") +
+  
+  scale_color_manual(
+    name = NULL,
+    values = c(
+      "Near Oil" = "#d73027",
+      "Far from Oil" = "#4575b4"
+    ),
+    guide = guide_legend(override.aes = list(size = 3, alpha = 1))
+  ) +
+  
+  coord_sf(xlim = c(34, 62), ylim = c(12, 42), expand = FALSE) +
+  
+  labs(
+    title = "Cities and Oil Infrastructure (60 km Buffer)",
+    subtitle = "Broader proximity reveals stronger spatial patterns",
+    caption = "Sources: GOGPT, Natural Earth"
+  ) +
+  
+  theme_void() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 10, color = "grey40", hjust = 0.5),
+    plot.caption = element_text(size = 8, color = "grey50", hjust = 0.5),
+    legend.position = "left"
+  )
+```
+
+## Map 3: Combined spatial distribution
+
+```{r map_combined, fig.width=8, fig.height=6}
+legend_data_final <- data.frame(
+  x = c(0, 0, 0),
+  y = c(0, 0, 0),
+  type = c("Conflict Events", "Cities", "Oil Infrastructure")
+)
+
+ggplot() +
+  geom_sf(data = countries_map, fill = "#f5f0e8", color = "grey40", linewidth = 0.4) +
+  
+  geom_sf(data = oil_map,
+          aes(color = "Oil Infrastructure", shape = "Oil Infrastructure"),
+          size = 2.2,alpha = 1) +
+  
+  geom_sf(data = conflict_map,
+          aes(color = "Conflict Events", shape = "Conflict Events"),
+          size = 2,alpha = 0.9) +
+  
+  geom_sf(data = cities_map,
+          aes(color = "Cities", shape = "Cities"),
+          size = 1.2,alpha = 0.6) +
+  
+  geom_point(data = legend_data_final,
+             aes(x = x, y = y, color = type, shape = type),
+             size = 0, alpha = 0) +
+  
+  geom_sf_text(data = countries_map, aes(label = ADMIN),
+               size = 2.5, color = "grey30", fontface = "italic", linewidth = 0.5) +
+  
+  scale_color_manual(
+    name = NULL,
+    values = c(
+      "Conflict Events" = "#e8000d",
+      "Cities" = "#1f78b4",
+      "Oil Infrastructure" = "#0a3d62"
+    )
+  ) +
+  
+  scale_shape_manual(
+    name = NULL,
+    values = c(
+      "Conflict Events" = 16,  # circle
+      "Cities" = 4,            # cross
+      "Oil Infrastructure" = 15 # square
+    )
+  ) +
+  
+  guides(
+    color = guide_legend(override.aes = list(size = 3, alpha = 1)),
+    shape = guide_legend(override.aes = list(size = 3))
+  ) +
+  
+  coord_sf(xlim = c(34, 62), ylim = c(12, 42), expand = FALSE) +
+  
+  labs(
+    title = "Spatial Relationship Between Oil Infrastructure and Armed Conflict",
+    subtitle = "Spatial distribution of conflict events relative to oil infrastructure and urban locations",
+    caption = "Sources: ACLED, GOGPT, Natural Earth"
+  ) +
+  
+  theme_void() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 10, color = "grey40", hjust = 0.5),
+    plot.caption = element_text(size = 8, color = "grey50", hjust = 0.5),
+    legend.position = "left"
+  )
+```
 

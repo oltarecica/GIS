@@ -65,15 +65,18 @@ This project examines whether systematic spatial patterns exist between oil infr
 
 The analysis evaluates whether proximity-based relationships can be observed using multiple geospatial approaches. Specifically, the study combines city-level distance measures, buffer-level groupings, and conflict-level proximity metrics to provide a comprehensive spatial assessment. The analysis focuses on fixed oil infrastructure, such as plants and processing facilities, treated as discrete strategic assets. Linear infrastructure, such as pipelines, is excluded due to its extensive spatial coverage, which would reduce the analytical precision of proximity-based measures.
 
-# Motivation and literature Review
+# Motivation and Literature Review
 
-Natural resource infrastructure has long been associated with geopolitical tension and strategic competition. In the Middle East, oil infrastructure is deeply embedded within broader political and economic systems, often overlapping with areas of territorial contestation and military activity.
 
-Existing research suggests that strategic assets may influence the geography of conflict, either directly through targeting or indirectly through regional instability. However, these relationships are complex and often operate at broader spatial scales rather than at precise locations.
+A large literature links oil wealth to armed conflict. The core argument is that oil creates strong incentives for violence: valuable resource rents attract armed groups, and control over extraction sites becomes a strategic objective. In this sense, oil increases both the opportunity and the payoff from engaging in conflict. Resource abundance can therefore raise conflict risk by providing revenue to warring parties and increasing the value of territorial control (Humphreys, 2005). Empirical evidence shows that oil, more than other natural resources, is strongly associated with conflict onset and broader societal insecurity (De Soysa & Neumayer, 2015; Ross, 2012).
 
-A key limitation in the literature is the reliance on single measures of proximity, which may fail to capture the multi-dimensional nature of spatial relationships. Conflict may not occur exactly at infrastructure sites but may still be systematically closer to them compared to other areas.
+However, most of this literature works at the country level, asking whether oil-rich countries experience more conflict overall. This approach cannot capture how conflict is distributed within countries. Armed conflict is often concentrated in specific locations rather than spread evenly (Buhaug, 2010). As a result, existing studies do not answer a key question: are conflict events actually located near oil infrastructure on the ground (Colgan, 2016)?
 
-To address this gap, this project adopts a multi-method geospatial approach, allowing for the identification of consistent spatial patterns across different measurement strategies.
+This limitation is particularly evident in the Middle East. The region contains a large share of global oil reserves, and oil infrastructure is concentrated in specific areas. Control over these locations is often strategically important, making them potential focal points for violence. Despite this, there is limited systematic evidence on how conflict events are distributed relative to oil infrastructure across the region.
+
+To provide geographic context, Figures \ref{fig:map1}, \ref{fig:map2}, and \ref{fig:map3} show the spatial distribution of conflict events, oil infrastructure, and both layers combined across the eight study countries. These maps suggest a visual overlap between oil activity and conflict, motivating a more precise spatial analysis.
+
+We shift the focus from country-level analysis to subnational spatial relationships. Specifically, we ask: are conflict events located closer to oil infrastructure than would be expected by chance? Using geospatial methods across eight countries, we provide direct evidence on the spatial relationship between oil and conflict. This approach allows us to assess whether conflict events are systematically clustered around oil infrastructure or more widely distributed across the region. By combining multiple spatial measures, we evaluate the robustness of these patterns and provide a clearer understanding of the underlying geographic dynamics.
 
 # Data and Methodology
 
@@ -165,4 +168,12 @@ Future research could extend this approach by incorporating temporal dynamics, c
 
 # References
 
-Add your references here.
+Humphreys, M. (2005). Natural resources, conflict, and conflict resolution. *Journal of Conflict Resolution*, 49(4), 508–537.
+
+De Soysa, I., & Neumayer, E. (2015). Is oil different? Evidence from the natural resource curse. *World Development*, 67, 412–425.
+
+Ross, M. L. (2012). *The oil curse: How petroleum wealth shapes the development of nations*. Princeton University Press.
+
+Buhaug, H. (2010). Dude, where’s my conflict? Local determinants of civil war. *Conflict Management and Peace Science*, 27(2), 107–128.
+
+Colgan, J. D. (2016). Oil and revolutionary governments: Fuel for international conflict. *International Organization*, 70(4), 661–694.

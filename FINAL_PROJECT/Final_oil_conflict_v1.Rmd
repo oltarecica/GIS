@@ -84,14 +84,14 @@ We shift the focus from country-level analysis to subnational spatial relationsh
 
 The analysis focuses on eight countries in the Middle East: Saudi Arabia, Iraq, Iran, Kuwait, United Arab Emirates, Qatar, Syria, and Yemen. To examine the spatial relationship between oil infrastructure and conflict, the project combines georeferenced data on conflict events, fixed oil and gas infrastructure, populated places, and country boundaries.
 
-**Conflict data come from the Armed Conflict Location & Event Data Project (ACLED)**, using an aggregated weekly dataset for the Middle East. From the raw file, the sample is restricted to the eight study countries. Observations with missing geographic coordinates are removed, and the date variable is standardized. The remaining records are converted into a spatial dataset using the reported longitude and latitude coordinates. Because the source is aggregated at the weekly level, each observation represents a conflict record associated with a specific location and week.
+**Conflict data come from the Armed Conflict Location & Event Data Project (ACLED)**, using an aggregated weekly dataset for the Middle East (file: *Middle-East\_aggregated\_data\_up\_to-2026-03-07*). From the raw file, the sample is restricted to the eight study countries and to weeks beginning on or after 1 January 2010. Observations with missing centroid coordinates are removed, and the date variable is standardized. The remaining records are converted into a spatial dataset using the reported centroid longitude and latitude. Because the source is aggregated at the weekly level, each observation represents a single spatial record for a given administrative location and week, not an individual incident. All results expressed as shares or counts of "conflict records" refer to these weekly location-level aggregates.
 
-**Oil infrastructure is measured using the Global Oil and Gas Plant Tracker (GOGPT)**. This dataset provides point locations for oil and gas plants and units, together with information such as plant name, operational status, fuel classification, ownership, and capacity. The data are filtered to the study countries, and only observations with valid latitude and longitude are retained. These plant locations constitute the main infrastructure layer used in the empirical analysis.
+**Oil infrastructure is measured using the Global Oil and Gas Plant Tracker (GOGPT, January 2026 release)**. This dataset provides point locations for oil and gas plants and units, together with information such as plant name, operational status, fuel classification, ownership, and capacity. The data are filtered to the study countries, retaining only records whose fuel field contains the string "oil" and for which valid latitude and longitude coordinates exist. No restriction is applied by operational status: the infrastructure layer therefore includes facilities classified as operating, proposed, under construction, retired, and cancelled. This choice maximises spatial coverage but means that some sites in the analysis may not represent currently active installations.
 
-To represent populated locations, the study uses Natural Earth populated places data. These data provide city point locations and are filtered to the same eight countries. They are used in the city-level analysis, where each city is linked to the nearest conflict event and classified according to its proximity to oil infrastructure.
+To represent populated locations, the study uses Natural Earth populated places data (10m scale). These data provide point locations for settlements of all sizes and are filtered to the same eight countries, yielding a sample that includes cities, towns, and smaller populated places with no population threshold applied. Each settlement is treated as a single observation with equal weight in the city-level analysis, where it is linked to the nearest conflict record and classified according to its proximity to oil infrastructure.
 Country boundaries are taken from Natural Earth administrative polygons. These boundaries are used to define the study area and to provide geographic context for the maps.
 
-All spatial datasets are stored in two coordinate reference systems. Data in EPSG:4326 are used for mapping and visualization, while data in EPSG:3857 are used for buffer construction and distance calculations. This ensures consistency between cartographic presentation and spatial measurement.
+All spatial datasets are stored in two coordinate reference systems. Data in EPSG:4326 (WGS84 geographic coordinates) are used for mapping and visualization. Data in EPSG:3857 (Web Mercator) are used for buffer construction and distance calculations, as this projection provides metric units suitable for Euclidean distance measurement. Because Web Mercator introduces modest distance distortion at higher latitudes (approximately 2–3% at the northern boundary of the study region near Iran and Syria), all reported distances should be interpreted as approximate rather than exact values.
 
 ## Methodology
 
@@ -104,7 +104,7 @@ This triangulation strengthens the robustness of the findings by identifying pat
 
 ### Buffer Analysis and Spatial Classification
 
-First, we constructed buffer zones of 30 km and 60 km around oil infrastructure sites.
+First, we constructed circular buffer zones of exactly 30 km and 60 km radius around each oil infrastructure site using planar Euclidean geometry in EPSG:3857. Individual plant buffers are not dissolved prior to classification: a city or conflict record is classified as “near oil” if its point geometry falls within the buffer of any single plant, which is operationally equivalent to testing against a dissolved union of all buffers.
 
 Cities are classified based on whether their geographic coordinates fall within these buffer areas. A city is considered to be “within a buffer” if its location intersects with the area defined by the buffer distance around any oil infrastructure site. In practical terms, this means that the city lies within a specified radius (30 km or 60 km) of at least one oil-related location.
 
@@ -113,19 +113,19 @@ Based on this criterion, cities are grouped into two categories:
 cities near oil infrastructure (located within the buffer zones)
 cities farther from oil infrastructure (located outside the buffer zones)
 
-This classification allows for a comparison between cities that are geographically close to oil infrastructure and those that are not, providing a basis for analyzing differences in their proximity to conflict events.
+This classification allows for a comparison between cities that are geographically close to oil infrastructure and those that are not, providing a basis for analyzing differences in their proximity to conflict events. It should be noted that in Kuwait and Qatar, all cities in the dataset fall within 30 km of an oil plant, leaving no “farther from oil” comparison group for those countries at the 30 km threshold; they therefore contribute observations only to the near-oil group in that analysis.
 
-Similarly, conflict events are classified according to whether they occur within these buffer zones. This allows for the calculation of the share of conflict events located near oil infrastructure.
+Similarly, conflict records are classified according to whether they occur within these buffer zones. This allows for the calculation of the share of weekly conflict records located near oil infrastructure.
 
 ### City-Level Distance to Conflict
 
 For each city, the distance to the nearest conflict event is calculated using spatial nearest-neighbor methods. Specifically, each city is matched to its closest conflict event, and the geographic distance between the two is computed. This produces a continuous measure of proximity to conflict for every city, allowing for a detailed comparison across locations rather than relying on simple binary classifications.
 
-Cities are then grouped based on their proximity to oil infrastructure, as defined by the buffer zones constructed earlier (e.g., within 30 km or 60 km of oil sites). Within each group, the average distance to the nearest conflict event is calculated. By comparing these averages, the analysis assesses whether cities located near oil infrastructure tend to be systematically closer to conflict events than those located farther away. This approach provides a straightforward way to identify spatial differences in conflict exposure associated with proximity to oil infrastructure.
+Cities are then grouped based on their proximity to oil infrastructure, as defined by the buffer zones constructed earlier (e.g., within 30 km or 60 km of oil sites). Within each group, the average distance to the nearest conflict record is calculated. By comparing these averages across groups, the analysis assesses whether cities located near oil infrastructure tend to be systematically closer to conflict events than those located farther away. The comparison is made using a Welch two-sample t-test, which does not assume equal variances between groups. The test is run separately for each buffer threshold; no correction for multiple comparisons is applied across the two thresholds. Observations from all eight countries are pooled into a single test, so the result reflects a regional average rather than a country-stratified effect.
 
 ### Conflict-Level Distance to Oil Infrastructure
 
-Distances from each conflict event to the nearest oil infrastructure site are computed using spatial nearest-neighbor techniques. For each event, the minimum distance to any oil-related site is identified, producing a continuous measure of proximity.
+For each conflict record, the minimum Euclidean distance to any oil infrastructure site is computed from a pairwise distance matrix calculated in EPSG:3857, producing a continuous nearest-distance measure for every observation.
 
 This approach generates a full distribution of distances, which can be summarized using descriptive statistics such as the mean, median, and range. Examining this distribution allows for an assessment of how conflict events are spatially positioned relative to oil infrastructure, including whether they tend to cluster within specific distance bands or are more widely dispersed across the region.
 
@@ -133,9 +133,9 @@ This approach generates a full distribution of distances, which can be summarize
 
 ## Cities Proximity to Conflict
 
-At the 30 km threshold, cities located near oil infrastructure exhibit lower average distances to conflict events compared to those located farther away (approximately 75.6 km vs. 83.6 km). A Welch two-sample t-test confirms that this difference is not statistically significant (t = 0.73, df = 119.3, p = 0.469), suggesting that the modest gap observed at this scale could plausibly arise by chance. At the 60 km threshold, the difference becomes substantially larger. Cities near oil infrastructure are, on average, located approximately 23 km closer to conflict events than those farther away (69.6 km vs. 92.7 km). This difference is statistically significant (t = 2.26, df = 167.6, p = 0.025), indicating that the spatial association between city proximity to oil infrastructure and exposure to conflict is unlikely to be due to random variation alone. 
+At the 30 km threshold, cities located near oil infrastructure exhibit lower average distances to conflict records compared to those located farther away (approximately 75.6 km vs. 83.6 km). A Welch two-sample t-test confirms that this difference is not statistically significant (t = 0.73, df = 119.3, p = 0.469), suggesting that the modest gap observed at this scale could plausibly arise by chance. At the 60 km threshold, the difference becomes substantially larger. Cities near oil infrastructure are, on average, located approximately 23 km closer to conflict records than those farther away (69.6 km vs. 92.7 km). This difference is statistically significant at the conventional 5% level (t = 2.26, df = 167.6, p = 0.025). Because two thresholds are tested on the same sample, a Bonferroni correction would set the adjusted significance boundary at p < 0.025; the 60 km result sits exactly at that boundary and should therefore be interpreted as marginal rather than conclusive evidence.
 
-This pattern indicates that the spatial association between oil infrastructure and conflict is more clearly observable when broader geographic definitions of proximity are considered. The 60 km buffer is the threshold at which the signal becomes statistically detectable with this dataset. Importantly, these results reflect differences in spatial distribution rather than direct causal relationships, and should be interpreted as descriptive patterns.
+These results are pooled across all eight countries; the t-test does not control for country-level differences in geography or conflict intensity. The pattern indicates that the spatial association between oil infrastructure and conflict is more clearly observable when broader geographic definitions of proximity are considered. Importantly, these results reflect differences in spatial distribution rather than direct causal relationships, and should be interpreted as descriptive patterns.
 
 ## Conflict Proximity to Oil Infrastructure
 
@@ -147,10 +147,10 @@ Country-level patterns reveal substantial heterogeneity. Kuwait and Qatar have t
 
 Buffer-based results show that:
 
-Approximately 25% of conflict events occur within 30 km of oil infrastructure
-Approximately 40% of conflict events occur within 60 km
+Approximately 25% of weekly conflict records fall within 30 km of an oil infrastructure site
+Approximately 40% of weekly conflict records fall within 60 km
 
-This indicates that a substantial share of conflict events takes place in areas geographically close to oil infrastructure, particularly when larger spatial thresholds are considered. However, the majority of conflict events still occur outside these buffers, reinforcing the idea that conflict is not exclusively concentrated near oil sites.
+These shares are computed over the weekly location-level records in the ACLED dataset, not over individual incidents. In the absence of a null-model benchmark (i.e., the expected share if conflict were spatially random across the study region), the figures should be read as descriptive concentrations rather than as evidence of excess clustering relative to a baseline. Nonetheless, they indicate that a substantial share of conflict activity takes place in areas geographically close to oil infrastructure, particularly at broader distance thresholds. The majority of conflict records still fall outside these buffers, reinforcing the idea that conflict is not exclusively concentrated near oil sites.
 
 # Conclusions and Limitations
 
@@ -158,13 +158,21 @@ This study identifies consistent spatial patterns between oil infrastructure and
 Across multiple approaches, results suggest that conflict tends to occur relatively closer to oil infrastructure, particularly when broader distance thresholds are considered. However, these patterns are not localized, and conflict events are distributed across a wide geographic range.
 However, the observed spatial associations may reflect underlying regional dynamics, such as political instability, geographic clustering, or historical factors, rather than direct relationships between oil infrastructure and conflict occurrence.
 
-Several limitations should be noted:
+Several limitations should be noted.
 
-The analysis does not account for differences in conflict intensity or type
-Country-level heterogeneity is not explicitly modeled
-Distance-based measures do not capture strategic or political mechanisms
+First, the conflict dataset contains weekly location-level aggregate records rather than individual incidents. Summary statistics and buffer shares describe the distribution of these aggregates; they do not directly map to counts of discrete events or casualties.
 
-Future research could extend this approach by incorporating temporal dynamics, conflict intensity measures, or additional covariates to better understand the factors underlying these spatial patterns.
+Second, the oil infrastructure layer includes facilities of all operational statuses — operating, proposed, under construction, retired, and cancelled — alongside active installations. Including non-operational sites may overstate the geographic footprint of active infrastructure and thus inflate apparent proximity.
+
+Third, all distance and buffer calculations are performed in Web Mercator (EPSG:3857), which introduces modest distance distortion at higher latitudes. Reported distances are therefore approximate.
+
+Fourth, the t-tests pool observations from all eight countries without country-fixed effects or adjustment for spatial autocorrelation. Countries differ substantially in geographic size, oil density, and conflict patterns; the pooled test reflects a regional average that may mask important within-country heterogeneity. Additionally, two buffer thresholds are tested without a multiple-comparison correction, so the headline 60 km result (p = 0.025) should be treated as marginal.
+
+Fifth, cities in the Natural Earth populated places dataset are treated with equal weight regardless of population size, giving equivalent influence to major cities and small settlements.
+
+Finally, the analysis does not include a null-model benchmark for the buffer share figures, and distance-based measures do not capture strategic or political mechanisms linking oil infrastructure to conflict.
+
+Future research could extend this approach by incorporating a randomisation-based spatial null model, restricting infrastructure to operating facilities, applying country-stratified comparisons, and introducing temporal dynamics or conflict intensity measures to better understand the factors underlying these spatial patterns.
 
 # References
 

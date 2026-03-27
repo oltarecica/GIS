@@ -294,3 +294,567 @@ Ross, M. L. (2012). *The oil curse: How petroleum wealth shapes the development 
 Buhaug, H. (2010). Dude, where’s my conflict? Local determinants of civil war. *Conflict Management and Peace Science*, 27(2), 107–128.
 
 Colgan, J. D. (2016). Oil and revolutionary governments: Fuel for international conflict. *International Organization*, 70(4), 661–694.
+
+# Appendix
+
+This appendix presents the complete analysis pipeline from data cleaning through to final results. All code chunks are shown for transparency but are not executed during rendering (`eval=FALSE`).
+
+## A1. Data Cleaning
+
+```{r appendix_cleaning_libs, eval=FALSE}
+library(tidyverse)
+library(sf)
+library(readxl)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(stringr)
+
+dir.create("data/clean", recursive = TRUE, showWarnings = FALSE)
+
+study_countries <- c(
+  "Saudi Arabia", "Iraq", "Iran", "Kuwait",
+  "United Arab Emirates", "Qatar", "Syria", "Yemen"
+)
+
+save_dual_crs <- function(sf_obj, file_path) {
+  saveRDS(
+    list(
+      crs_4326 = st_transform(sf_obj, 4326),
+      crs_3857 = st_transform(sf_obj, 3857)
+    ),
+    file_path
+  )
+}
+```
+
+```{r appendix_cleaning_acled, eval=FALSE}
+# =============================================================================
+# 1. ACLED
+# =============================================================================
+
+acled_raw <- read_xlsx("data/Middle-East_aggregated_data_up_to-2026-03-07.xlsx")
+
+acled_clean <- acled_raw %>%
+  filter(COUNTRY %in% study_countries) %>%
+  mutate(
+    WEEK = as.Date(WEEK)
+  ) %>%
+  filter(
+    !is.na(CENTROID_LONGITUDE),
+    !is.na(CENTROID_LATITUDE)
+  ) %>%
+  st_as_sf(
+    coords = c("CENTROID_LONGITUDE", "CENTROID_LATITUDE"),
+    crs = 4326,
+    remove = FALSE
+  )
+
+save_dual_crs(acled_clean, "data/clean/acled_clean.rds")
+
+cat(
+  "ACLED:",
+  nrow(acled_clean), "rows across",
+  n_distinct(acled_clean$COUNTRY), "countries\n"
+)
+```
+
+```{r appendix_cleaning_gem, eval=FALSE}
+# =============================================================================
+# 2. GEM — Oil / NGL Pipelines
+# =============================================================================
+
+gem_raw <- st_read("data/GEM-GOIT-Oil-NGL-Pipelines-2025-03.geojson")
+
+gem_clean <- gem_raw %>%
+  filter(
+    str_detect(
+      coalesce(Countries, ""),
+      regex(str_c(study_countries, collapse = "|"), ignore_case = TRUE)
+    ) |
+      StartCountry %in% study_countries |
+      EndCountry %in% study_countries
+  ) %>%
+  filter(!st_is_empty(geometry)) %>%
+  st_transform(4326) %>%
+  select(ProjectID, PipelineName, Countries, Status,
+         Capacity, CapacityUnits, LengthMergedKm,
+         StartLocation, StartCountry,
+         EndLocation,   EndCountry,
+         RouteType, RouteAccuracy, LastUpdated,
+         geometry)
+
+gem_3857 <- st_transform(gem_clean, 3857)
+
+saveRDS(gem_clean, "data/clean/gem_clean.rds")
+saveRDS(gem_3857,  "data/clean/gem_3857.rds")
+```
+
+```{r appendix_cleaning_places, eval=FALSE}
+# =============================================================================
+# 3. Natural Earth populated places
+# =============================================================================
+
+places_raw <- ne_download(
+  scale = 10,
+  type = "populated_places",
+  category = "cultural",
+  returnclass = "sf"
+)
+
+places_clean <- places_raw %>%
+  filter(ADM0NAME %in% study_countries)
+
+save_dual_crs(places_clean, "data/clean/places_clean.rds")
+```
+
+```{r appendix_cleaning_gogpt, eval=FALSE}
+# =============================================================================
+# 4. Global Oil and Gas Plant Tracker (GOGPT)
+# =============================================================================
+
+gogpt_raw <- read_xlsx(
+  "data/Global-Oil-and-Gas-Plant-Tracker-GOGPT-January-2026.xlsx",
+  sheet = "Gas & Oil Units"
+)
+
+gogpt_clean <- gogpt_raw %>%
+  rename(
+    Country        = `Country/Area`,
+    PlantName      = `Plant name`,
+    UnitName       = `Unit name`,
+    CapacityMW     = `Capacity (MW)`,
+    StartYear      = `Start year`,
+    RetiredYear    = `Retired year`,
+    Operators      = `Operator(s)`,
+    Owners         = `Owner(s)`,
+    StateProvince  = `State/Province`,
+    LocationAcc    = `Location accuracy`,
+    FuelClass      = `Fuel classification?`,
+    GEM_UnitID     = `GEM unit ID`,
+    GEM_LocationID = `GEM location ID`
+  ) %>%
+  filter(Country %in% study_countries) %>%
+  drop_na(Latitude, Longitude) %>%
+  st_as_sf(coords = c("Longitude", "Latitude"), crs = 4326, remove = FALSE) %>%
+  select(GEM_UnitID, GEM_LocationID, PlantName, UnitName, Country,
+         Fuel, FuelClass, CapacityMW, Status, StartYear, RetiredYear,
+         Operators, Owners, StateProvince, City,
+         LocationAcc, Latitude, Longitude, geometry)
+
+gogpt_3857 <- st_transform(gogpt_clean, 3857)
+
+saveRDS(gogpt_clean, "data/clean/gogpt_clean.rds")
+saveRDS(gogpt_3857,  "data/clean/gogpt_3857.rds")
+```
+
+```{r appendix_cleaning_countries, eval=FALSE}
+# =============================================================================
+# 5. Natural Earth country boundaries
+# =============================================================================
+
+countries_raw <- ne_download(
+  scale = 10,
+  type = "admin_0_countries",
+  category = "cultural",
+  returnclass = "sf"
+)
+
+countries_clean <- countries_raw %>%
+  filter(ADMIN %in% study_countries)
+
+save_dual_crs(countries_clean, "data/clean/countries_clean.rds")
+```
+
+## A2. Baseline Maps
+
+```{r appendix_maps_load, eval=FALSE}
+library(sf)
+library(ggplot2)
+library(ggdensity)
+
+conflict_list  <- readRDS("data/clean/acled_clean.rds")
+conflict       <- conflict_list$crs_4326
+
+countries_list <- readRDS("data/clean/countries_clean.rds")
+countries      <- countries_list$crs_4326
+
+gem   <- readRDS("data/clean/gem_clean.rds")
+gogpt <- readRDS("data/clean/gogpt_clean.rds")
+```
+
+```{r appendix_map1, eval=FALSE}
+# Map 1: Armed conflict events
+legend_data1 <- data.frame(
+  x = c(0), y = c(0), type = c("Conflict Events")
+)
+
+ggplot() +
+  geom_sf(data = countries, fill = "#f5f0e8", color = "grey40", linewidth = 0.4) +
+  geom_sf(data = conflict, color = "#e8000d", size = 0.6, alpha = 0.7) +
+  geom_point(data = legend_data1, aes(x = x, y = y, color = type), size = 0, alpha = 0) +
+  geom_sf_text(data = countries, aes(label = ADMIN), size = 2.5, color = "grey30", fontface = "italic") +
+  scale_color_manual(
+    name   = NULL,
+    values = c("Conflict Events" = "#e8000d"),
+    guide  = guide_legend(override.aes = list(size = 3, alpha = 1))
+  ) +
+  coord_sf(xlim = c(34, 62), ylim = c(12, 42), expand = FALSE) +
+  labs(
+    title    = "Armed Conflict Events in the Middle East",
+    subtitle = "Based on ACLED data across eight study countries",
+    caption  = "Source: Armed Conflict Location & Event Data (ACLED)"
+  ) +
+  theme_void() +
+  theme(
+    plot.title      = element_text(size = 14, face = "bold", hjust = 0.5),
+    plot.subtitle   = element_text(size = 10, color = "grey40", hjust = 0.5),
+    plot.caption    = element_text(size = 8,  color = "grey50", hjust = 0.5),
+    plot.margin     = margin(10, 10, 10, 10),
+    legend.position = "left",
+    legend.text     = element_text(size = 8)
+  )
+```
+
+```{r appendix_map2, eval=FALSE}
+# Map 2: Oil infrastructure
+gem_clipped <- st_intersection(gem, st_union(countries))
+
+legend_data2 <- data.frame(
+  x = c(0, 0), y = c(0, 0),
+  type = c("Extraction Sites", "Pipelines (——)")
+)
+
+ggplot() +
+  geom_sf(data = countries, fill = "#f5f0e8", color = "grey40", linewidth = 0.4) +
+  geom_sf(data = gem_clipped, color = "#1a6b9e", linewidth = 0.5, alpha = 0.5) +
+  geom_sf(data = gogpt, color = "#0a3d62", size = 0.6, alpha = 0.8) +
+  geom_point(data = legend_data2, aes(x = x, y = y, color = type), size = 0, alpha = 0) +
+  geom_sf_text(data = countries, aes(label = ADMIN), size = 2.5, color = "grey30", fontface = "italic") +
+  scale_color_manual(
+    name   = NULL,
+    values = c("Extraction Sites" = "#0a3d62", "Pipelines (——)" = "#1a6b9e"),
+    guide  = guide_legend(override.aes = list(size = 3, alpha = 1))
+  ) +
+  coord_sf(xlim = c(34, 62), ylim = c(12, 42), expand = FALSE) +
+  labs(
+    title    = "Oil Infrastructure in the Middle East",
+    subtitle = "Pipelines and extraction sites across eight study countries",
+    caption  = "Sources: Global Energy Monitor (GEM), Global Oil & Gas Production Tracker"
+  ) +
+  theme_void() +
+  theme(
+    plot.title      = element_text(size = 14, face = "bold", hjust = 0.5),
+    plot.subtitle   = element_text(size = 10, color = "grey40", hjust = 0.5),
+    plot.caption    = element_text(size = 8,  color = "grey50", hjust = 0.5),
+    plot.margin     = margin(10, 10, 10, 10),
+    legend.position = "left",
+    legend.text     = element_text(size = 8)
+  )
+```
+
+```{r appendix_map3, eval=FALSE}
+# Map 3: Combined overlay
+legend_data3 <- data.frame(
+  x = c(0, 0, 0), y = c(0, 0, 0),
+  type = c("Conflict Events", "Extraction Sites", "Pipelines (——)")
+)
+
+ggplot() +
+  geom_sf(data = countries, fill = "#f5f0e8", color = "grey40", linewidth = 0.4) +
+  geom_sf(data = gem_clipped, color = "#1a6b9e", linewidth = 0.5, alpha = 0.5) +
+  geom_sf(data = gogpt, color = "#0a3d62", size = 0.6, alpha = 0.8) +
+  geom_sf(data = conflict, color = "#e8000d", size = 0.6, alpha = 0.5) +
+  geom_point(data = legend_data3, aes(x = x, y = y, color = type), size = 0, alpha = 0) +
+  geom_sf_text(data = countries, aes(label = ADMIN), size = 2.5, color = "grey30", fontface = "italic") +
+  scale_color_manual(
+    name   = NULL,
+    values = c("Conflict Events" = "#e8000d", "Extraction Sites" = "#0a3d62", "Pipelines (——)" = "#1a6b9e"),
+    guide  = guide_legend(override.aes = list(size = 3, alpha = 1))
+  ) +
+  coord_sf(xlim = c(34, 62), ylim = c(12, 42), expand = FALSE) +
+  labs(
+    title    = "Armed Conflict and Oil Infrastructure in the Middle East",
+    subtitle = "Conflict events (red), extraction sites and pipelines (blue)",
+    caption  = "Sources: ACLED, Global Energy Monitor (GEM), Global Oil & Gas Production Tracker"
+  ) +
+  theme_void() +
+  theme(
+    plot.title      = element_text(size = 14, face = "bold", hjust = 0.5),
+    plot.subtitle   = element_text(size = 10, color = "grey40", hjust = 0.5),
+    plot.caption    = element_text(size = 8,  color = "grey50", hjust = 0.5),
+    plot.margin     = margin(10, 10, 10, 10),
+    legend.position = "left",
+    legend.text     = element_text(size = 8)
+  )
+```
+
+## A3. Buffer Construction, City Tagging, and Distance Calculations
+
+```{r appendix_spatial_setup, eval=FALSE}
+library(sf)
+library(dplyr)
+library(stringr)
+library(rnaturalearth)
+library(ggplot2)
+
+gogpt_3857   <- readRDS("data/clean/gogpt_3857.rds")
+acled        <- readRDS("data/clean/acled_clean.rds")
+countries    <- readRDS("data/clean/countries_clean.rds")
+
+countries_sf <- countries$crs_3857
+conflict_sf  <- acled$crs_3857 %>%
+  filter(WEEK >= as.Date("2010-01-01")) %>%
+  st_make_valid()
+
+oil_sf <- gogpt_3857 %>%
+  filter(str_detect(tolower(Fuel), "oil")) %>%
+  st_make_valid()
+
+oil_sf <- st_intersection(oil_sf, st_union(countries_sf))
+```
+
+```{r appendix_cities, eval=FALSE}
+country_names <- c(
+  "Saudi Arabia", "Iraq", "Iran", "Kuwait",
+  "United Arab Emirates", "Qatar", "Syria", "Yemen"
+)
+
+cities_sf <- ne_download(
+  scale = 10,
+  type = "populated_places",
+  returnclass = "sf"
+) %>%
+  filter(ADM0NAME %in% country_names) %>%
+  st_make_valid()
+
+cities_sf <- st_transform(cities_sf, 3857)
+```
+
+```{r appendix_buffers, eval=FALSE}
+# Buffer creation and city tagging
+oil_union <- st_union(oil_sf)
+
+oil_buffer_30 <- st_buffer(oil_union, dist = 30000)
+oil_buffer_60 <- st_buffer(oil_union, dist = 60000)
+
+cities_sf$near_oil_30km <- lengths(
+  st_intersects(cities_sf, oil_buffer_30)
+) > 0
+
+cities_sf$near_oil_60km <- lengths(
+  st_intersects(cities_sf, oil_buffer_60)
+) > 0
+```
+
+```{r appendix_conflict_buffers, eval=FALSE}
+# Classify conflict events within buffer zones
+conflict_in_30 <- lengths(st_intersects(conflict_sf, oil_buffer_30)) > 0
+conflict_in_60 <- lengths(st_intersects(conflict_sf, oil_buffer_60)) > 0
+
+conflict_sf$in_buffer_30 <- conflict_in_30
+conflict_sf$in_buffer_60 <- conflict_in_60
+```
+
+```{r appendix_city_distances, eval=FALSE}
+# Distance from each city to nearest conflict event
+nearest_index <- st_nearest_feature(cities_sf, conflict_sf)
+
+cities_sf$dist_to_conflict_km <- as.numeric(
+  st_distance(cities_sf, conflict_sf[nearest_index, ], by_element = TRUE)
+) / 1000
+```
+
+```{r appendix_conflict_distances, eval=FALSE}
+# Distance from each conflict event to nearest oil plant
+conflict_to_oil_dist <- st_distance(conflict_sf, oil_sf)
+
+conflict_sf$dist_to_oil_km <- apply(conflict_to_oil_dist, 1, min) / 1000
+
+# Save tagged datasets
+saveRDS(cities_sf,   "data/clean/cities_tagged.rds")
+saveRDS(conflict_sf, "data/clean/conflict_tagged.rds")
+```
+
+## A4. Results and Figures
+
+```{r appendix_results_load, eval=FALSE}
+library(sf)
+library(tidyverse)
+
+cities_sf   <- readRDS("data/clean/cities_tagged.rds")
+conflict_sf <- readRDS("data/clean/conflict_tagged.rds")
+
+oil_sf <- readRDS("data/clean/gogpt_3857.rds") %>%
+  filter(str_detect(Fuel, regex("oil", ignore_case = TRUE)))
+
+oil_buffer_30 <- st_buffer(oil_sf, dist = 30000)
+oil_buffer_60 <- st_buffer(oil_sf, dist = 60000)
+```
+
+```{r appendix_results_table, eval=FALSE}
+results_table <- cities_sf %>%
+  st_drop_geometry() %>%
+  mutate(oil_tag = if_else(near_oil_30km, "Near oil", "Not near oil")) %>%
+  group_by(Country = ADM0NAME, oil_tag) %>%
+  summarise(
+    n_cities       = n(),
+    avg_dist_km    = round(mean(dist_to_conflict_km, na.rm = TRUE), 1),
+    median_dist_km = round(median(dist_to_conflict_km, na.rm = TRUE), 1),
+    .groups = "drop"
+  ) %>%
+  arrange(Country, oil_tag)
+
+knitr::kable(
+  results_table,
+  col.names = c("Country", "Oil Tag", "N Cities", "Avg Dist (km)", "Median Dist (km)"),
+  caption   = "Average distance to nearest conflict event by country and oil proximity tag (30 km buffer)"
+)
+```
+
+```{r appendix_fig1, eval=FALSE}
+# Figure 1: Bar chart — average distance to conflict by country
+ggplot(results_table, aes(x = reorder(Country, avg_dist_km), y = avg_dist_km,
+                           fill = oil_tag)) +
+  geom_col(position = position_dodge(width = 0.75), width = 0.65) +
+  geom_text(
+    aes(label = paste0(avg_dist_km, " km")),
+    position = position_dodge(width = 0.75),
+    vjust = -0.4, size = 3
+  ) +
+  scale_fill_manual(
+    values = c("Near oil" = "#D85A30", "Not near oil" = "#378ADD"),
+    name   = "Oil proximity\n(30 km buffer)"
+  ) +
+  labs(
+    title    = "Average Distance to Nearest Conflict Event",
+    subtitle = "Oil vs. non-oil cities by country",
+    x        = NULL,
+    y        = "Average distance (km)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.x     = element_text(angle = 30, hjust = 1),
+    plot.title      = element_text(face = "bold"),
+    legend.position = "top"
+  )
+
+ggsave("figures/fig1_bar_chart.png", width = 9, height = 5, dpi = 300)
+```
+
+```{r appendix_fig2, eval=FALSE}
+# Figure 2: Distribution of city distances to conflict
+cities_plot <- cities_sf %>%
+  st_drop_geometry() %>%
+  mutate(oil_tag = if_else(near_oil_30km, "Near oil", "Not near oil"))
+
+ggplot(cities_plot, aes(x = dist_to_conflict_km, fill = oil_tag)) +
+  geom_histogram(bins = 30, alpha = 0.7, position = "identity", color = "white") +
+  scale_fill_manual(
+    values = c("Near oil" = "#D85A30", "Not near oil" = "#378ADD"),
+    name   = "Oil proximity\n(30 km buffer)"
+  ) +
+  facet_wrap(~ ADM0NAME, scales = "free_y") +
+  labs(
+    title    = "Distribution of City Distances to Nearest Conflict Event",
+    subtitle = "Each panel = one country; 30 km buffer tag",
+    x        = "Distance to nearest conflict event (km)",
+    y        = "Number of cities"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    plot.title      = element_text(face = "bold"),
+    legend.position = "top",
+    strip.text      = element_text(face = "bold")
+  )
+
+ggsave("figures/fig2_distribution.png", width = 9, height = 5, dpi = 300)
+```
+
+```{r appendix_ttest, eval=FALSE}
+# T-tests: 30 km and 60 km buffers
+cities_ttest <- cities_sf %>% st_drop_geometry()
+
+t_result_30 <- t.test(dist_to_conflict_km ~ near_oil_30km, data = cities_ttest)
+t_result_60 <- t.test(dist_to_conflict_km ~ near_oil_60km, data = cities_ttest)
+
+t_result_30
+t_result_60
+```
+
+```{r appendix_fig3, eval=FALSE}
+# Figure 3: Average distance from conflict to oil by country
+conflict_oil_summary <- conflict_sf %>%
+  st_drop_geometry() %>%
+  group_by(Country = COUNTRY) %>%
+  summarise(
+    n_events       = n(),
+    avg_dist_km    = round(mean(dist_to_oil_km, na.rm = TRUE), 1),
+    median_dist_km = round(median(dist_to_oil_km, na.rm = TRUE), 1),
+    .groups = "drop"
+  ) %>%
+  arrange(avg_dist_km)
+
+ggplot(conflict_oil_summary,
+       aes(x = reorder(Country, avg_dist_km), y = avg_dist_km)) +
+  geom_col(fill = "#D85A30", width = 0.65) +
+  geom_text(aes(label = paste0(avg_dist_km, " km")), vjust = -0.4, size = 3) +
+  labs(
+    title    = "Average Distance from Conflict Events to Nearest Oil Plant",
+    subtitle = "Lower = conflict tends to happen closer to oil infrastructure",
+    x        = NULL,
+    y        = "Average distance (km)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.x  = element_text(angle = 30, hjust = 1),
+    plot.title   = element_text(face = "bold")
+  )
+
+ggsave("figures/fig3_conflict_to_oil.png", width = 9, height = 4, dpi = 300)
+```
+
+```{r appendix_fig4, eval=FALSE}
+# Figure 4: Share of conflict inside buffer zones by country
+buffer_country <- conflict_sf %>%
+  st_drop_geometry() %>%
+  group_by(Country = COUNTRY) %>%
+  summarise(
+    n_events    = n(),
+    pct_in_30km = round(100 * mean(in_buffer_30), 1),
+    pct_in_60km = round(100 * mean(in_buffer_60), 1),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(pct_in_30km))
+
+buffer_long <- buffer_country %>%
+  pivot_longer(cols = c(pct_in_30km, pct_in_60km),
+               names_to  = "buffer",
+               values_to = "pct") %>%
+  mutate(buffer = if_else(buffer == "pct_in_30km", "30 km buffer", "60 km buffer"))
+
+ggplot(buffer_long, aes(x = reorder(Country, pct), y = pct, fill = buffer)) +
+  geom_col(position = position_dodge(width = 0.75), width = 0.65) +
+  geom_text(
+    aes(label = paste0(pct, "%")),
+    position = position_dodge(width = 0.75),
+    vjust = -0.4, size = 3
+  ) +
+  scale_fill_manual(
+    values = c("30 km buffer" = "#D85A30", "60 km buffer" = "#378ADD"),
+    name   = NULL
+  ) +
+  labs(
+    title    = "Share of Conflict Events Inside Oil Buffer Zones",
+    subtitle = "By country",
+    x        = NULL,
+    y        = "% of conflict events"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text.x     = element_text(angle = 30, hjust = 1),
+    plot.title      = element_text(face = "bold"),
+    legend.position = "top"
+  )
+
+ggsave("figures/fig4_buffer_share.png", width = 9, height = 5, dpi = 300)
+```

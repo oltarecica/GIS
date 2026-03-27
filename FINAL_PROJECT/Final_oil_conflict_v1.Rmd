@@ -184,9 +184,31 @@ This approach generates a full distribution of distances, which can be summarize
 
 ## Cities Proximity to Conflict
 
-At the 30 km threshold, cities located near oil infrastructure exhibit lower average distances to conflict events compared to those located farther away (approximately 75.6 km vs. 83.6 km). A Welch two-sample t-test confirms that this difference is not statistically significant (t = 0.73, df = 119.3, p = 0.469), suggesting that the modest gap observed at this scale could plausibly arise by chance. At the 60 km threshold, the difference becomes substantially larger. Cities near oil infrastructure are, on average, located approximately 23 km closer to conflict events than those farther away (69.6 km vs. 92.7 km). This difference is statistically significant (t = 2.26, df = 167.6, p = 0.025), indicating that the spatial association between city proximity to oil infrastructure and exposure to conflict is unlikely to be due to random variation alone. 
+To assess whether cities near oil infrastructure are systematically closer to conflict, each city was first tagged based on whether it falls within a 30 km or 60 km buffer around any oil plant. Each city was then matched to its nearest recorded conflict event using a spatial nearest-neighbor approach, producing one continuous distance measure per city. Cities were then grouped by their oil proximity tag, and the average distance to conflict was compared across the two groups. This comparison is summarized in the code block above and visualized in Figures 1 and 2.
 
-This pattern indicates that the spatial association between oil infrastructure and conflict is more clearly observable when broader geographic definitions of proximity are considered. The 60 km buffer is the threshold at which the signal becomes statistically detectable with this dataset. Importantly, these results reflect differences in spatial distribution rather than direct causal relationships, and should be interpreted as descriptive patterns.
+At the 30 km threshold, cities located near oil infrastructure exhibit lower average distances to conflict events compared to those located farther away (approximately 75.6 km vs. 83.6 km). A Welch two-sample t-test confirms that this difference is not statistically significant (t = 0.73, df = 119.3, p = 0.469), suggesting that the modest gap observed at this scale could plausibly arise by chance. The Welch variant is used rather than a standard t-test because it does not assume equal variance between groups, which is appropriate given the unequal group sizes across buffer thresholds.
+
+At the 60 km threshold, the difference becomes substantially larger. Cities near oil infrastructure are, on average, located approximately 23 km closer to conflict events than those farther away (69.6 km vs. 92.7 km). This difference is statistically significant (t = 2.26, df = 167.6, p = 0.025), indicating that the spatial association between city proximity to oil infrastructure and exposure to conflict is unlikely to be due to random variation alone.
+
+The sensitivity of the result to buffer size is itself informative. At 30 km the signal is weak and insignificant, while at 60 km it becomes detectable. This suggests that the spatial relationship between oil infrastructure and conflict operates at a broader geographic scale rather than in the immediate vicinity of plants. Importantly, these results reflect differences in spatial distribution rather than direct causal relationships and should be interpreted as descriptive patterns.
+
+```{r results_summary, echo=TRUE, eval=FALSE}
+cities_sf %>%
+  st_drop_geometry() %>%
+  mutate(oil_tag = if_else(near_oil_30km, "Near oil", "Not near oil")) %>%
+  group_by(Country = ADM0NAME, oil_tag) %>%
+  summarise(
+    n_cities       = n(),
+    avg_dist_km    = round(mean(dist_to_conflict_km, na.rm = TRUE), 1),
+    median_dist_km = round(median(dist_to_conflict_km, na.rm = TRUE), 1),
+    .groups = "drop"
+  )
+```
+
+```{r ttest, echo=TRUE, eval=FALSE}
+t.test(dist_to_conflict_km ~ near_oil_30km, data = cities_sf)
+t.test(dist_to_conflict_km ~ near_oil_60km, data = cities_sf)
+```
 
 ```{r fig1, out.width="100%", fig.cap="Average distance to nearest conflict event by country. Red = cities near oil infrastructure (30 km buffer); blue = cities not near oil infrastructure."}
 knitr::include_graphics("figures/fig1_bar_chart.png")
@@ -198,7 +220,9 @@ knitr::include_graphics("figures/fig2_distribution.png")
 
 ## Conflict Proximity to Oil Infrastructure
 
-The distribution of distances from conflict events to oil infrastructure shows that conflict typically occurs within a regional range of oil-related locations. The median distance is approximately 81 km, with an average close to 88 km, indicating that while some events occur near infrastructure, many are located at moderate distances. This suggests that conflict is not tightly concentrated around oil sites but tends to occur within broader regions where oil infrastructure is present.
+This analysis reverses the direction of the previous measure. Rather than asking how far cities are from conflict, we ask how far each conflict event is from its nearest oil plant. For each of the 96,906 conflict events in the dataset, the minimum distance to any oil plant was computed using the full pairwise distance matrix. This produces a continuous proximity measure for every conflict event, which can then be summarized and compared across countries.
+
+The overall distribution shows that conflict typically occurs within a regional range of oil-related locations. The median distance is approximately 81 km, with an average close to 88 km, indicating that while some events occur near infrastructure, many are located at moderate distances. This suggests that conflict is not tightly concentrated around oil sites but tends to occur within broader regions where oil infrastructure is present.
 
 Country-level patterns reveal substantial heterogeneity. Kuwait and Qatar have the shortest average distances (25.5 km and 38.2 km respectively), reflecting their small geographic size and high density of oil infrastructure. Iraq, with the largest number of conflict events (22,541), shows an average distance of 52.2 km, indicating meaningful spatial overlap between conflict and oil sites. At the other extreme, Saudi Arabia and Yemen show average distances exceeding 115 km, suggesting that in these countries conflict events are more spatially separated from oil infrastructure.
 
@@ -208,12 +232,11 @@ knitr::include_graphics("figures/fig3_conflict_to_oil.png")
 
 ## Share of Conflict Events Near Oil Infrastructure
 
-Buffer-based results show that:
+As a third and complementary measure, each conflict event was classified as falling inside or outside the 30 km and 60 km buffer zones constructed around oil plants. This binary classification allows us to compute the share of all conflict events that occur within a given proximity of oil infrastructure, providing a straightforward summary of spatial overlap between conflict and oil.
 
-Approximately 25% of conflict events occur within 30 km of oil infrastructure
-Approximately 40% of conflict events occur within 60 km
+Buffer-based results show that approximately 25% of conflict events occur within 30 km of oil infrastructure, rising to approximately 40% within 60 km. Given that oil plants occupy only a small fraction of the total land area across the eight study countries, these shares represent a meaningful spatial concentration. The country-level breakdown in Figure 4 shows where this concentration is strongest: Kuwait and Qatar have the highest shares, while Yemen and Saudi Arabia have the lowest, consistent with the distance-based findings above.
 
-This indicates that a substantial share of conflict events takes place in areas geographically close to oil infrastructure, particularly when larger spatial thresholds are considered. However, the majority of conflict events still occur outside these buffers, reinforcing the idea that conflict is not exclusively concentrated near oil sites.
+However, the majority of conflict events still occur outside these buffers, reinforcing the idea that conflict is not exclusively concentrated near oil sites and that other geographic and political factors also shape its distribution.
 
 ```{r fig4, out.width="100%", fig.cap="Share of conflict events falling inside 30 km and 60 km oil plant buffer zones, by country."}
 knitr::include_graphics("figures/fig4_buffer_share.png")

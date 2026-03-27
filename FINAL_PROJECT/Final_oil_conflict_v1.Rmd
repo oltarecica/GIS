@@ -23,6 +23,59 @@ header-includes:
     \renewcommand{\headrulewidth}{0.4pt}
     \renewcommand{\footrulewidth}{0pt}
 ---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+library(sf)
+library(tidyverse)
+
+cities_sf   <- readRDS("data/clean/cities_tagged.rds")
+conflict_sf <- readRDS("data/clean/conflict_tagged.rds")
+oil_sf      <- readRDS("data/clean/gogpt_3857.rds") %>%
+  filter(str_detect(Fuel, regex("oil", ignore_case = TRUE)))
+oil_buffer_30 <- st_buffer(oil_sf, dist = 30000)
+oil_buffer_60 <- st_buffer(oil_sf, dist = 60000)
+
+# Pre-compute all objects needed in the Results section
+cities_ttest <- cities_sf %>% st_drop_geometry()
+
+results_table <- cities_ttest %>%
+  mutate(oil_tag = if_else(near_oil_30km, "Near oil", "Not near oil")) %>%
+  group_by(Country = ADM0NAME, oil_tag) %>%
+  summarise(
+    n_cities       = n(),
+    avg_dist_km    = round(mean(dist_to_conflict_km, na.rm = TRUE), 1),
+    median_dist_km = round(median(dist_to_conflict_km, na.rm = TRUE), 1),
+    .groups = "drop"
+  ) %>%
+  arrange(Country, oil_tag)
+
+t_result_30 <- t.test(dist_to_conflict_km ~ near_oil_30km, data = cities_ttest)
+t_result_60 <- t.test(dist_to_conflict_km ~ near_oil_60km, data = cities_ttest)
+
+conflict_oil_summary <- conflict_sf %>%
+  st_drop_geometry() %>%
+  group_by(Country = COUNTRY) %>%
+  summarise(
+    n_events       = n(),
+    avg_dist_km    = round(mean(dist_to_oil_km, na.rm = TRUE), 1),
+    median_dist_km = round(median(dist_to_oil_km, na.rm = TRUE), 1),
+    .groups = "drop"
+  ) %>%
+  arrange(avg_dist_km)
+
+buffer_country <- conflict_sf %>%
+  st_drop_geometry() %>%
+  group_by(Country = COUNTRY) %>%
+  summarise(
+    n_events    = n(),
+    pct_in_30km = round(100 * mean(in_buffer_30), 1),
+    pct_in_60km = round(100 * mean(in_buffer_60), 1),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(pct_in_30km))
+```
+
 \begin{titlepage}
 \centering
 
@@ -57,9 +110,7 @@ Olsa Berani
 
 # Introduction
 
-The spatial distribution of armed conflict is shaped by a combination of political, economic, and geographic factors. In regions such as the Middle East, where oil infrastructure plays a central strategic role, understanding how conflict events are distributed relative to these assets is particularly relevant.
-
-Oil infrastructure, including extraction sites, pipelines, and refineries, represents key economic and geopolitical resources. While these assets are often discussed in relation to conflict dynamics, the extent to which conflict events are spatially concentrated around them remains an empirical question.
+The spatial distribution of armed conflict is shaped by a combination of political, economic, and geographic factors. In regions such as the Middle East, where oil infrastructure plays a central strategic role, understanding how conflict events are distributed relative to these assets is particularly relevant. Oil infrastructure, including extraction sites, pipelines, and refineries, represents key economic and geopolitical resources. While these assets are often discussed in relation to conflict dynamics, the extent to which conflict events are spatially concentrated around them remains an empirical question.
 
 This project examines whether systematic spatial patterns exist between oil infrastructure and conflict events across eight countries in the Middle East: Saudi Arabia, Iraq, Iran, Kuwait, United Arab Emirates, Qatar, Syria, and Yemen. Specifically, the research question guiding this analysis is: **What is the spatial relationship between oil infrastructure and armed conflict events in the Middle East?**
 
@@ -137,11 +188,23 @@ At the 30 km threshold, cities located near oil infrastructure exhibit lower ave
 
 This pattern indicates that the spatial association between oil infrastructure and conflict is more clearly observable when broader geographic definitions of proximity are considered. The 60 km buffer is the threshold at which the signal becomes statistically detectable with this dataset. Importantly, these results reflect differences in spatial distribution rather than direct causal relationships, and should be interpreted as descriptive patterns.
 
+```{r fig1, out.width="100%", fig.cap="Average distance to nearest conflict event by country. Red = cities near oil infrastructure (30 km buffer); blue = cities not near oil infrastructure."}
+knitr::include_graphics("figures/fig1_bar_chart.png")
+```
+
+```{r fig2, out.width="100%", fig.cap="Distribution of city distances to nearest conflict event, by country and oil proximity tag (30 km buffer)."}
+knitr::include_graphics("figures/fig2_distribution.png")
+```
+
 ## Conflict Proximity to Oil Infrastructure
 
 The distribution of distances from conflict events to oil infrastructure shows that conflict typically occurs within a regional range of oil-related locations. The median distance is approximately 81 km, with an average close to 88 km, indicating that while some events occur near infrastructure, many are located at moderate distances. This suggests that conflict is not tightly concentrated around oil sites but tends to occur within broader regions where oil infrastructure is present.
 
 Country-level patterns reveal substantial heterogeneity. Kuwait and Qatar have the shortest average distances (25.5 km and 38.2 km respectively), reflecting their small geographic size and high density of oil infrastructure. Iraq, with the largest number of conflict events (22,541), shows an average distance of 52.2 km, indicating meaningful spatial overlap between conflict and oil sites. At the other extreme, Saudi Arabia and Yemen show average distances exceeding 115 km, suggesting that in these countries conflict events are more spatially separated from oil infrastructure.
+
+```{r fig3, out.width="100%", fig.cap="Average distance from conflict events to nearest oil plant, by country."}
+knitr::include_graphics("figures/fig3_conflict_to_oil.png")
+```
 
 ## Share of Conflict Events Near Oil Infrastructure
 
@@ -151,6 +214,10 @@ Approximately 25% of conflict events occur within 30 km of oil infrastructure
 Approximately 40% of conflict events occur within 60 km
 
 This indicates that a substantial share of conflict events takes place in areas geographically close to oil infrastructure, particularly when larger spatial thresholds are considered. However, the majority of conflict events still occur outside these buffers, reinforcing the idea that conflict is not exclusively concentrated near oil sites.
+
+```{r fig4, out.width="100%", fig.cap="Share of conflict events falling inside 30 km and 60 km oil plant buffer zones, by country."}
+knitr::include_graphics("figures/fig4_buffer_share.png")
+```
 
 # Conclusions and Limitations
 

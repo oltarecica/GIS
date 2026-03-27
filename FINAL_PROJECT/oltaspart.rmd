@@ -115,6 +115,8 @@ ggplot(results_table, aes(x = reorder(Country, avg_dist_km), y = avg_dist_km,
     plot.title      = element_text(face = "bold"),
     legend.position = "top"
   )
+
+ggsave("figures/fig1_bar_chart.png", width = 9, height = 5, dpi = 300)
 ```
 
 ---
@@ -152,6 +154,8 @@ ggplot(cities_plot, aes(x = dist_to_conflict_km, fill = oil_tag)) +
     legend.position = "top",
     strip.text      = element_text(face = "bold")
   )
+
+ggsave("figures/fig2_distribution.png", width = 9, height = 5, dpi = 300)
 ```
 
 ---
@@ -293,6 +297,8 @@ ggplot(conflict_oil_summary,
     axis.text.x  = element_text(angle = 30, hjust = 1),
     plot.title   = element_text(face = "bold")
   )
+
+ggsave("figures/fig3_conflict_to_oil.png", width = 9, height = 4, dpi = 300)
 ```
 
 ---
@@ -352,6 +358,8 @@ ggplot(buffer_long, aes(x = reorder(Country, pct), y = pct, fill = buffer)) +
     plot.title      = element_text(face = "bold"),
     legend.position = "top"
   )
+
+ggsave("figures/fig4_buffer_share.png", width = 9, height = 5, dpi = 300)
 ```
 
 ---
